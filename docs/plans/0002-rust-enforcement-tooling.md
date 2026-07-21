@@ -1,6 +1,6 @@
 # Plan 0002 — Rust enforcement tooling
 
-> **Status:** approved
+> **Status:** in-progress
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
 > **Related ADRs:** [ADR-0001](../adrs/0001-rust-core-wgpu-cabi-foobar-shim.md) (the layering
