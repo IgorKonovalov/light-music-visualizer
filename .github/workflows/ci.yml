@@ -38,3 +38,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: taiki-e/install-action@cargo-deny
       - run: cargo deny check
+
+  # UB gate (Plan 0005, unblocking Plan 0002's deferred Phase 5). Miri checks
+  # the SPSC ring's `unsafe` - the only pure-Rust unsafe in the tree. It runs
+  # against lmv-ring alone: a zero-dependency crate with no wgpu/naga graph, so
+  # Miri compiles and interprets it in seconds instead of the whole render
+  # stack. Platform-independent unsafe, so once on the cheapest runner.
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install nightly --component miri
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo +nightly miri test -p lmv-ring
