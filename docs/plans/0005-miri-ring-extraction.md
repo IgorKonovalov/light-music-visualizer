@@ -1,6 +1,6 @@
 # 0005 — Extract the lock-free ring into a wgpu-free crate for Miri
 
-> **Status:** draft
+> **Status:** approved (2026-07-21)
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
 > **Related:** [Plan 0002](done/0002-rust-enforcement-tooling.md) — implements its **deferred

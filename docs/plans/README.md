@@ -3,15 +3,16 @@
 The one-minute "what's in flight" view. Read this first each session instead of
 re-deriving state from `git log`. Completed plans move to `done/`.
 
-**Next free number: 0006**
+**Next free number: 0007**
 
 ## Active roster
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0003](0003-generative-scenes-and-presets.md) | Generative scenes + data-driven presets | approved | Shadertoy-style fragment-field scene + ~10k-particle CPU swarm, driven by TOML+expression presets (ADR-0002 layers 1-2). DSP enriched with bass/mid/treb + deterministic tempo/BPM. **Amended: adds Phase 0** (relocate scenes under `render/` + panic-pragma guard, closing the 0002 review gap). Defers Rhai, blending, compute-scale. Drafts roadmap item 1. |
+| [0003](0003-generative-scenes-and-presets.md) | Generative scenes + data-driven presets | in-progress (paused) | **Paused mid-implementation by the user.** Shadertoy-style fragment-field scene + ~10k-particle CPU swarm, driven by TOML+expression presets (ADR-0002 layers 1-2). DSP enriched with bass/mid/treb + deterministic tempo/BPM. **Amended: adds Phase 0** (relocate scenes under `render/` + panic-pragma guard, closing the 0002 review gap). Defers Rhai, blending, compute-scale. Drafts roadmap item 1. |
 | [0004](0004-foobar-ui-element-panel.md) | foo_lmv as an embeddable Default UI panel | approved | Register a Default UI `ui_element` so the visualizer docks as a layout panel, not just a pop-out window. Keeps both entry points sharing one wgpu surface via a single claimable `VizSession`; right-click "Next scene"; throttle + pause-when-hidden. Plugin-only, no ABI change. Relates to roadmap item 4 (UX). |
-| [0005](0005-miri-ring-extraction.md) | Extract the lock-free ring into a wgpu-free crate for Miri | draft | Implements Plan 0002's deferred Phase 5: pull the SPSC ring out of `core/src/audio.rs` into a zero-dep `lmv-ring` crate, then run `cargo +nightly miri test -p lmv-ring` as a fast CI UB gate (no wgpu graph to compile). Rejected feature-gating wgpu in `lmv-core`. Behavior-preserving. |
+| [0005](0005-miri-ring-extraction.md) | Extract the lock-free ring into a wgpu-free crate for Miri | approved | Implements Plan 0002's deferred Phase 5: pull the SPSC ring out of `core/src/audio.rs` into a zero-dep `lmv-ring` crate, then run `cargo +nightly miri test -p lmv-ring` as a fast CI UB gate (no wgpu graph to compile). Rejected feature-gating wgpu in `lmv-core`. Behavior-preserving. |
+| [0006](0006-versioning-wiring.md) | Versioning: single source of truth + cargo-release + surfacing | draft | Implements [ADR-0005](../adrs/0005-versioning-and-release-cadence.md): collapse the workspace's two `0.1.0` strings into one `[workspace.package].version`, adopt `cargo-release` (`--no-push`, tag `vX.Y.Z`) as the single bump authority run once per plan at the architect close, surface the version in the standalone title. Keeps `0.1.0` baseline; C-ABI version stays a separate axis; plugin version independent. dev wires it, human installs cargo-release + confirms baseline. |
 
 ## Recently closed
 
