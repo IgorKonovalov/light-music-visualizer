@@ -9,12 +9,28 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0002](0002-rust-enforcement-tooling.md) | Rust enforcement tooling | approved | Automatic gates for the best-practice rules: rustfmt + workspace lints → clippy determinism bans → hot-path panic-denial + exact-pin/pragma guard tests → cargo-deny → nextest → Miri. Strict but rational. |
 | [0003](0003-generative-scenes-and-presets.md) | Generative scenes + data-driven presets | approved | Shadertoy-style fragment-field scene + ~10k-particle CPU swarm, driven by TOML+expression presets (ADR-0002 layers 1-2). DSP enriched with bass/mid/treb + deterministic tempo/BPM. Defers Rhai, blending, compute-scale. Drafts roadmap item 1. |
 | [0004](0004-foobar-ui-element-panel.md) | foo_lmv as an embeddable Default UI panel | approved | Register a Default UI `ui_element` so the visualizer docks as a layout panel, not just a pop-out window. Keeps both entry points sharing one wgpu surface via a single claimable `VizSession`; right-click "Next scene"; throttle + pause-when-hidden. Plugin-only, no ABI change. Relates to roadmap item 4 (UX). |
 
 ## Recently closed
 
+- [0002 — Rust enforcement tooling](done/0002-rust-enforcement-tooling.md) —
+  **done 2026-07-21**, passed Mode 4 review (no blockers). Phases 0-4 landed and are green
+  locally (fmt, clippy `-D warnings`, both hygiene guards, cargo-deny). Panic pragma on all 7
+  core hot-path files with reasoned in-bounds escapes; no production hot-path panics.
+  **⚠ Carried forward (two items):**
+  1. **Phase 5 (Miri CI job) was DEFERRED, not run** — `lmv-core`'s lib pulls the full
+     wgpu/naga graph, so a full-crate Miri job is impractical (>10 min). The ring IS verified
+     UB-clean locally (`cargo +nightly miri test -p lmv-core --lib`, all 5 ring tests incl. the
+     cross-thread SPSC case, 95 s); only the CI automation is outstanding. **Architect-scoped
+     follow-up:** extract the lock-free ring (and any pure-Rust `unsafe`) into a wgpu-free
+     module/crate Miri can check in isolation, then add the Miri job against it — weigh the
+     extraction against "lightweight is a feature" (a new crate is a cost); may want an ADR.
+  2. **`core/src/scenes/` is per-frame render code but outside the hot-path pragma set and the
+     `tests/hygiene.rs` scan set.** Safe by construction today, but Plan 0003 fills `scenes/`
+     with heavy per-frame indexing (fragment-field + ~10k-particle swarm + expression eval).
+     Resolve *with* Plan 0003: add `scenes/` to both the pragma and the guard's scan set, or
+     document the exclusion.
 - [0001 — Core + standalone MVP, then foobar parity](done/0001-core-and-standalone-mvp.md) —
   **done 2026-07-21**, passed Mode 4 review (no blockers; C ABI recorded in
   [ADR-0003](../adrs/0003-c-abi-v1-surface.md)). Windows standalone + foobar2000 plugin
@@ -25,14 +41,11 @@ re-deriving state from `git log`. Completed plans move to `done/`.
   13+, grant the screen-recording permission, confirm live visuals; report results and route
   any fixes to `dev` (the `capture_mac` path). This is the one outstanding piece of v1.
 
-**Execution note:** Plan 0001 outran 0002 entirely — all of its code phases (0–9), including
-Phase 6's C ABI `unsafe`, landed before 0002 was built. So 0002 now runs purely as
-**retroactive hardening**: expect its first run to add the `#![deny(...)]` pragma to the
-existing `dsp`/`audio`/`render`/`ffi` modules and to surface any latent `unwrap`/indexing in the
-ring, DSP, and FFI. The Mode 4 review of 0001 confirmed the hot paths are already panic-free by
-construction, so the pragma should land clean — but it also flagged that the **C ABI has no
-automated test coverage** (the C++ shim is not built in CI, and no in-crate FFI test exists);
-adding a minimal `lmv_create`/`push`/`free` test is a natural 0002 gate-work candidate.
+**Open gap (from the 0001/0002 reviews):** the **C ABI has no automated test coverage** — the
+C++ shim is not built in CI, and no in-crate FFI test exists. 0002 armed the pragma and
+supply-chain gates but did not add an FFI test (it was never a 0002 phase). A minimal
+`lmv_create`/`push`/`free` Rust-side test remains an unassigned candidate for a future plan;
+Miri (the deferred 0002 Phase 5) would cover the ring/FFI pointer handling once it runs.
 
 ## Roadmap (agreed 2026-07-21, revised same day for the live-show use case; numbers assigned when drafted)
 

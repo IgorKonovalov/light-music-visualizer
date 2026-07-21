@@ -1,10 +1,22 @@
 # Plan 0002 — Rust enforcement tooling
 
-> **Status:** in-progress
+> **Status:** done (2026-07-21) — Phases 0-4 implemented and passed the Mode 4 review (no
+> blockers). Verified locally: `cargo fmt --check`, `cargo clippy --all-targets -D warnings`,
+> both `tests/hygiene.rs` guards, and `cargo deny check` all green; the panic pragma is present
+> in all 7 core hot-path files with reasoned, provably-in-bounds `indexing_slicing` escapes, and
+> no production hot-path `unwrap`/`expect`/`panic` exists (test-only unwraps sit under
+> `#[cfg(test)]`). **Phase 5 (Miri CI job) is DEFERRED — NOT run in CI.** `lmv-core`'s lib pulls
+> the whole wgpu/naga graph, making a full-crate Miri job impractical (>10 min); dev confirmed
+> `cargo +nightly miri test -p lmv-core --lib` is UB-clean locally (all 5 ring tests incl. the
+> cross-thread SPSC case, 95 s), so the unsafe ring is verified — only the CI automation is
+> carried forward. Follow-up (architect-scoped): extract the lock-free ring into a wgpu-free
+> module/crate Miri can check in isolation, then add the Miri job against it (weigh against the
+> "every crate is a cost" rule). See the plans README. Note: the mermaid diagram below still
+> shows the intended `miri` CI job — kept as the design of record; it was deferred, not shipped.
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
-> **Related ADRs:** [ADR-0001](../adrs/0001-rust-core-wgpu-cabi-foobar-shim.md) (the layering
-> this tooling defends), [ADR-0002](../adrs/0002-layered-preset-architecture.md) (the thin Scene
+> **Related ADRs:** [ADR-0001](../../adrs/0001-rust-core-wgpu-cabi-foobar-shim.md) (the layering
+> this tooling defends), [ADR-0002](../../adrs/0002-layered-preset-architecture.md) (the thin Scene
 > trait these gates keep thin)
 
 ## TL;DR
