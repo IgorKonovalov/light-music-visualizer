@@ -173,3 +173,44 @@ fn bad_presets_are_rejected() {
     // Not even valid TOML.
     assert!(Preset::from_toml_str("system = ").is_err());
 }
+
+#[test]
+fn embedded_default_presets_all_parse() {
+    // The C-ABI / foobar path relies on these rendering without a preset dir.
+    let presets = lmv_core::preset::default_presets();
+    assert_eq!(
+        presets.len(),
+        4,
+        "all shipped example presets should compile"
+    );
+}
+
+#[test]
+fn load_dir_loads_the_good_and_reports_the_bad() {
+    use std::fs;
+
+    let dir = std::env::temp_dir().join("lmv_preset_load_test");
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("create temp preset dir");
+    fs::write(
+        dir.join("good.toml"),
+        "system = \"swarm\"\n[params]\nforce = \"1 + bass * 2\"\n",
+    )
+    .expect("write good preset");
+    fs::write(
+        dir.join("bad.toml"),
+        "system = \"swarm\"\n[params]\nforce = \"bass * \"\n",
+    )
+    .expect("write bad preset");
+    fs::write(dir.join("notes.txt"), "not a preset").expect("write non-toml");
+
+    let report = lmv_core::preset::load_dir(&dir);
+    assert_eq!(report.presets.len(), 1, "only the valid .toml loads");
+    assert_eq!(report.errors.len(), 1, "the malformed .toml is reported");
+
+    // A missing directory is empty, not an error (degrade, never crash).
+    let missing = lmv_core::preset::load_dir(&dir.join("does_not_exist"));
+    assert!(missing.presets.is_empty() && missing.errors.is_empty());
+
+    let _ = fs::remove_dir_all(&dir);
+}

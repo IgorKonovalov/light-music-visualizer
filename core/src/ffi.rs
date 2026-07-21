@@ -265,7 +265,7 @@ pub unsafe extern "C" fn lmv_cycle_scene(handle: *mut LmvHandle) -> i32 {
         let state = unsafe { &mut *handle.render.get() };
         match state.renderer.as_mut() {
             Some(renderer) => {
-                renderer.cycle_scene();
+                renderer.cycle_preset();
                 LMV_OK
             }
             None => LMV_ERR_NO_WINDOW,

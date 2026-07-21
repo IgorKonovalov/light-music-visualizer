@@ -1,0 +1,11 @@
+# Pulse Field - tighter and beat-forward: each beat kicks the warp and every
+# onset flashes the field. Mids push the hue around.
+system = "fragment_field"
+name = "Pulse Field"
+
+[params]
+warp  = "0.5 + beat * 0.8 + clamp(bass * 10, 0, 1.2)"
+hue   = "0.5 + time * 0.02 + clamp(mid * 4, 0, 1)"
+zoom  = "1.1 + clamp(bass * 6, 0, 0.5)"
+glow  = "0.5 + clamp(mid * 10, 0, 1)"
+flash = "clamp(onset * 4, 0, 1)"

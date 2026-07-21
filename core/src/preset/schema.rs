@@ -106,6 +106,8 @@ pub enum PresetError {
         /// The compile error.
         err: ExprError,
     },
+    /// The preset file could not be read (message from the I/O error).
+    Io(String),
 }
 
 impl fmt::Display for PresetError {
@@ -116,6 +118,7 @@ impl fmt::Display for PresetError {
             PresetError::Expr { param, err } => {
                 write!(f, "parameter '{param}' has an invalid expression: {err}")
             }
+            PresetError::Io(msg) => write!(f, "could not read preset file: {msg}"),
         }
     }
 }

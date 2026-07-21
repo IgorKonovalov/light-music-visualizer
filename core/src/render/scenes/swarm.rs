@@ -1,11 +1,11 @@
-//! Particle-swarm scene: ~10k CPU-simulated particles drifting through an
-//! audio-driven flow field, drawn as instanced additive sprites (the
-//! starfield's rendering approach, scaled up and generalized).
+//! Particle-swarm scene: ~10k CPU-simulated particles drifting through a flow
+//! field, drawn as instanced additive sprites (the starfield's approach,
+//! scaled up). One of the two preset-driven systems (ADR-0002 layers 1-2).
 //!
-//! Bass swells the flow force, the beat fires an outward burst, the bar phase
-//! and mid band evolve the field, and treble shifts the palette. All per-
-//! particle math is CPU-side — no compute shader (Plan 0003 Phase 3). Motion
-//! is deterministic; the only randomness is the explicitly seeded initial
+//! Its behavior is a set of named parameters — `force`, `spin`, `burst`, `hue`,
+//! `brightness`, `size` — that a preset binds to expressions over the audio
+//! analysis (Plan 0003 Phase 5). All per-particle math is CPU-side; no compute
+//! shader. Motion is deterministic; the only randomness is the seeded initial
 //! scatter (NFR 6).
 
 // Hot-path panic-denial pragma (Plan 0002 Phase 2, extended to scenes by Plan
@@ -35,15 +35,14 @@ const SEED: u64 = 0x4C4D_565F_5357_524D; // "LMV_SWRM"
 const DAMPING: f32 = 0.86;
 /// Spatial frequency of the flow field.
 const FIELD_FREQ: f32 = 2.3;
-/// Baseline steering force and the extra the bass band adds.
-const BASE_FORCE: f32 = 1.4;
-const BASS_FORCE: f32 = 3.0;
-/// Outward radial impulse a beat injects (scaled by the decaying burst).
-const BURST_FORCE: f32 = 4.0;
-/// Band gain: raw band means are small (energy spread over many bins); lift
-/// them into a usable 0..1 drive range. A display knob, like the fragment
-/// scene's — Phase 5 presets will expose it.
-const BAND_GAIN: f32 = 8.0;
+
+/// Parameter defaults — a calm idle drift when nothing is bound.
+const DEFAULT_FORCE: f32 = 1.4;
+const DEFAULT_SPIN: f32 = 0.3;
+const DEFAULT_BURST: f32 = 0.0;
+const DEFAULT_HUE: f32 = 0.0;
+const DEFAULT_BRIGHTNESS: f32 = 0.8;
+const DEFAULT_SIZE: f32 = 1.0;
 
 const SHADER: &str = r#"
 struct Misc {
@@ -111,7 +110,7 @@ struct Particle {
     size: f32,
 }
 
-/// ~10k-particle CPU flow-field swarm with instanced additive rendering.
+/// ~10k-particle CPU flow-field swarm, driven by named preset parameters.
 pub struct SwarmScene {
     pipeline: wgpu::RenderPipeline,
     instances: wgpu::Buffer,
@@ -119,13 +118,14 @@ pub struct SwarmScene {
     bind_group: wgpu::BindGroup,
     particles: Vec<Particle>,
     instance_data: Vec<Instance>,
-    /// Scene clock (seconds), fixed timestep — never the wall clock (NFR 6).
+    /// Shared scene clock (seconds), set by the renderer each frame.
     time: f32,
-    bass: f32,
-    mid: f32,
-    treb: f32,
+    force: f32,
+    spin: f32,
     burst: f32,
-    bar: f32,
+    hue: f32,
+    brightness: f32,
+    size: f32,
 }
 
 impl SwarmScene {
@@ -233,11 +233,12 @@ impl SwarmScene {
                 PARTICLES
             ],
             time: 0.0,
-            bass: 0.0,
-            mid: 0.0,
-            treb: 0.0,
-            burst: 0.0,
-            bar: 0.0,
+            force: DEFAULT_FORCE,
+            spin: DEFAULT_SPIN,
+            burst: DEFAULT_BURST,
+            hue: DEFAULT_HUE,
+            brightness: DEFAULT_BRIGHTNESS,
+            size: DEFAULT_SIZE,
         }
     }
 
@@ -258,11 +259,6 @@ impl SwarmScene {
     }
 }
 
-/// Perceptual lift of a raw band mean into a 0..1 drive range.
-fn shape(level: f32) -> f32 {
-    (level * BAND_GAIN).clamp(0.0, 1.0).sqrt()
-}
-
 /// iq-style cosine palette (RGB phase-shifted), matching the fragment field's.
 fn palette(t: f32) -> [f32; 3] {
     let tau = std::f32::consts::TAU;
@@ -278,23 +274,40 @@ impl Scene for SwarmScene {
         "swarm"
     }
 
+    fn set_time(&mut self, time: f32) {
+        self.time = time;
+    }
+
+    fn reset_params(&mut self) {
+        self.force = DEFAULT_FORCE;
+        self.spin = DEFAULT_SPIN;
+        self.burst = DEFAULT_BURST;
+        self.hue = DEFAULT_HUE;
+        self.brightness = DEFAULT_BRIGHTNESS;
+        self.size = DEFAULT_SIZE;
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) {
+        match name {
+            "force" => self.force = value,
+            "spin" => self.spin = value,
+            "burst" => self.burst = value,
+            "hue" => self.hue = value,
+            "brightness" => self.brightness = value,
+            "size" => self.size = value,
+            _ => {}
+        }
+    }
+
     #[allow(
         clippy::indexing_slicing,
         reason = "pos/vel index fixed [f32; 2] and base indexes a fixed [f32; 3], all at constant offsets, always in-bounds"
     )]
-    fn update(&mut self, frame: &AnalysisFrame) {
-        self.time += SCENE_DT;
-        self.bass = shape(frame.bass);
-        self.mid = shape(frame.mid);
-        self.treb = shape(frame.treb);
-        self.burst = if frame.beat { 1.0 } else { self.burst * 0.88 };
-        self.bar = frame.bar;
-
-        // Field evolves faster with mids and the bar phase; bass steers harder.
-        let field_t = self.time * (0.3 + self.mid * 0.6 + self.bar * 0.4);
-        let force = BASE_FORCE + self.bass * BASS_FORCE;
-        let burst_kick = self.burst * BURST_FORCE;
-        let hue_shift = self.time * 0.02 + self.treb * 0.4;
+    fn update(&mut self, _frame: &AnalysisFrame) {
+        // Field evolves at `spin`; `force` steers, `burst` shoves outward.
+        let field_t = self.time * self.spin;
+        let force = self.force;
+        let burst_kick = self.burst;
 
         for (p, inst) in self.particles.iter_mut().zip(self.instance_data.iter_mut()) {
             // Scalar potential -> flow direction (cheap curl-ish field).
@@ -328,15 +341,13 @@ impl Scene for SwarmScene {
             }
 
             let speed = (p.vel[0] * p.vel[0] + p.vel[1] * p.vel[1]).sqrt();
-            let base = palette(p.hue + hue_shift);
-            let bright = ((0.25 + speed * 0.7 + self.burst * 0.6) * p.bright).min(1.6);
-            // Bass lifts everyone; treble tints toward the palette's high end.
-            let lift = bright * (0.6 + self.bass * 0.8);
+            let base = palette(p.hue + self.hue);
+            let bright = ((0.25 + speed * 0.7) * p.bright).min(1.6) * self.brightness;
 
             *inst = Instance {
                 center: p.pos,
-                size: p.size * (1.0 + self.burst * 0.5),
-                color: [base[0] * lift, base[1] * lift, base[2] * lift],
+                size: p.size * self.size,
+                color: [base[0] * bright, base[1] * bright, base[2] * bright],
             };
         }
     }

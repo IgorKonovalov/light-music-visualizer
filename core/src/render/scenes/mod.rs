@@ -27,8 +27,13 @@ use crate::dsp::AnalysisFrame;
 /// design in the fixed-quality MVP; the quality-tier plan revisits this.
 pub(crate) const SCENE_DT: f32 = 1.0 / 60.0;
 
-/// One visual. Init is the constructor; `update` advances state from the
-/// analysis frame; `render` draws with the state it has.
+/// One visual. `update` advances state from the analysis frame; `render` draws
+/// with the state it has.
+///
+/// Preset-driven systems (fragment field, swarm) additionally implement the
+/// named-parameter surface — `set_time`, `reset_params`, `set_param` — that the
+/// preset layer evaluates into per frame (ADR-0002). Legacy scenes inherit the
+/// no-op defaults and stay frame-driven.
 pub(crate) trait Scene {
     fn name(&self) -> &'static str;
     fn update(&mut self, frame: &AnalysisFrame);
@@ -39,6 +44,15 @@ pub(crate) trait Scene {
         view: &wgpu::TextureView,
         aspect: f32,
     );
+
+    /// Set the shared scene clock (seconds). The renderer owns the single clock
+    /// so an expression's `time` and the system's animation never diverge.
+    fn set_time(&mut self, _time: f32) {}
+    /// Reset every named parameter to its default (called each frame before the
+    /// active preset's bindings are applied, so unbound params don't leak).
+    fn reset_params(&mut self) {}
+    /// Apply one named parameter; unknown names are ignored.
+    fn set_param(&mut self, _name: &str, _value: f32) {}
 }
 
 /// The registry: every built-in scene, in cycling order. All scenes are

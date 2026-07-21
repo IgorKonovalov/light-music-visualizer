@@ -1,0 +1,12 @@
+# Flow - a calm swarm. Bass steers harder, mids evolve the flow field, treble
+# tints the palette, and each beat gives a small outward nudge.
+system = "swarm"
+name = "Flow"
+
+[params]
+force      = "1.2 + clamp(bass * 20, 0, 4)"
+spin       = "0.3 + clamp(mid * 6, 0, 1.2)"
+burst      = "beat * 5"
+hue        = "time * 0.02 + clamp(treb * 4, 0, 1)"
+brightness = "0.6 + clamp(bass * 6, 0, 0.8)"
+size       = "1.0 + beat * 0.6"

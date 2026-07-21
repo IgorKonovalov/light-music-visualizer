@@ -1,0 +1,12 @@
+# Burst - beat-driven explosions over a faster-evolving field. Harder steering
+# and a big radial shove on every beat.
+system = "swarm"
+name = "Burst"
+
+[params]
+force      = "1.6 + clamp(bass * 24, 0, 5)"
+spin       = "0.5 + clamp(mid * 8, 0, 1.5)"
+burst      = "beat * 9"
+hue        = "0.4 + time * 0.05"
+brightness = "0.7 + clamp((bass + treb) * 5, 0, 1)"
+size       = "1.0 + beat * 1.0"

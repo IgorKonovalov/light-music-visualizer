@@ -1,11 +1,12 @@
 //! Fragment-field scene: a fullscreen Shadertoy-style domain-warped field,
-//! colored by a cosine palette and driven by the audio analysis. This is the
-//! first "generative-art"-tier built-in (Plan 0003 Phase 1) and the system the
-//! preset layer will later parameterize (ADR-0002 layers 1-2).
+//! colored by a cosine palette. The first "generative-art"-tier built-in and
+//! one of the two preset-driven systems (ADR-0002 layers 1-2).
 //!
-//! It is driven by the analyzer's `bass`/`mid`/`treb` bands (Plan 0003 Phase 2;
-//! Phase 1 used spectrum proxies over the same uniform layout) plus the onset
-//! and beat signals.
+//! Its look is a set of named parameters — `warp`, `hue`, `zoom`, `glow`,
+//! `flash` — that a preset binds to expressions over the audio analysis (Plan
+//! 0003 Phase 5). With no preset the parameter defaults render a gentle idle
+//! field. The scene reads no audio directly; all reactivity flows through the
+//! parameter values.
 
 // Hot-path panic-denial pragma (Plan 0002 Phase 2, extended to scenes by Plan
 // 0003 Phase 0). Runs every displayed frame.
@@ -17,27 +18,22 @@
     clippy::unreachable
 )]
 
-use super::{SCENE_DT, Scene};
+use super::Scene;
 use crate::dsp::AnalysisFrame;
 
-/// Smoothing decay for the band/energy envelopes (per frame; frame-rate
-/// coupled, fine for the fixed-quality MVP like the sibling scenes).
-const DECAY: f32 = 0.90;
-/// Onset-flash gain before clamping to 0..1.
-const ONSET_FLASH_GAIN: f32 = 3.0;
-/// Per-frame decay of the discrete beat "kick".
-const KICK_DECAY: f32 = 0.88;
-/// Lifts the analyzer's raw band means (small, since energy is spread across
-/// many linear bins) into a lively 0..1 visual range. A pure display knob —
-/// Phase 5 presets will expose this per-parameter.
-const BAND_GAIN: f32 = 8.0;
+/// Parameter defaults — a calm idle field when nothing is bound.
+const DEFAULT_WARP: f32 = 0.4;
+const DEFAULT_HUE: f32 = 0.0;
+const DEFAULT_ZOOM: f32 = 1.0;
+const DEFAULT_GLOW: f32 = 0.7;
+const DEFAULT_FLASH: f32 = 0.0;
 
 const SHADER: &str = r#"
 struct Params {
-    // x: time (s), y: aspect, z: onset flash 0..1, w: beat kick 0..1 (decaying)
-    misc: vec4<f32>,
-    // x: bass, y: mid, z: treb, w: overall energy (all smoothed, ~0..1)
-    bands: vec4<f32>,
+    // x: time (s), y: aspect, z: warp, w: hue
+    a: vec4<f32>,
+    // x: zoom, y: glow, z: flash, w: unused
+    b: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -70,22 +66,19 @@ fn palette(t: f32) -> vec3<f32> {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let t = params.misc.x;
-    let aspect = params.misc.y;
-    let flash = params.misc.z;
-    let kick = params.misc.w;
-    let bass = params.bands.x;
-    let mid = params.bands.y;
-    let treb = params.bands.z;
-    let energy = params.bands.w;
+    let t = params.a.x;
+    let aspect = params.a.y;
+    let warp = params.a.z;
+    let hue = params.a.w;
+    let zoom = params.b.x;
+    let glow = params.b.y;
+    let flash = params.b.z;
 
     var uv = in.ndc;
     uv.x = uv.x * aspect;
 
-    // Iterated sine-fold domain warp; bass swells the fold amount, the beat
-    // kick pushes an extra shove so drops visibly bloom.
-    var p = uv * (1.4 + bass * 1.2);
-    let warp = 0.30 + bass * 1.5 + kick * 0.6;
+    // Iterated sine-fold domain warp, scaled by zoom and folded by warp.
+    var p = uv * zoom;
     for (var i = 0; i < 5; i = i + 1) {
         let fi = f32(i);
         p = p + warp * vec2<f32>(
@@ -95,15 +88,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     let field = 0.5 + 0.5 * sin(p.x + p.y + t * 0.5);
-    let hue = field * 0.6 + t * 0.04 + treb * 0.35 + mid * 0.1;
-    var col = palette(hue);
+    var col = palette(field * 0.6 + hue);
 
-    // Radial falloff, lifted by overall energy and the onset flash.
     let r = length(uv);
-    let glow = (0.35 + energy * 1.5 + flash * 0.8) * (1.0 - 0.25 * r);
-    col = col * glow;
+    col = col * (glow * (1.0 - 0.25 * r));
     col = col + vec3<f32>(flash * 0.12);
-    col = col * (1.0 + kick * 0.4);
 
     return vec4<f32>(col, 1.0);
 }
@@ -112,25 +101,22 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params {
-    misc: [f32; 4],
-    bands: [f32; 4],
+    a: [f32; 4],
+    b: [f32; 4],
 }
 
-/// Fullscreen domain-warped fragment field, audio-reactive via band proxies
-/// and the onset/beat signals.
+/// Fullscreen domain-warped fragment field, driven by named preset parameters.
 pub struct FragmentFieldScene {
     pipeline: wgpu::RenderPipeline,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
-    /// Scene clock (seconds), advanced by the fixed timestep — never the wall
-    /// clock (determinism, NFR 6).
+    /// Shared scene clock (seconds), set by the renderer each frame.
     time: f32,
-    bass: f32,
-    mid: f32,
-    treb: f32,
-    energy: f32,
+    warp: f32,
+    hue: f32,
+    zoom: f32,
+    glow: f32,
     flash: f32,
-    kick: f32,
 }
 
 impl FragmentFieldScene {
@@ -203,20 +189,13 @@ impl FragmentFieldScene {
             uniforms,
             bind_group,
             time: 0.0,
-            bass: 0.0,
-            mid: 0.0,
-            treb: 0.0,
-            energy: 0.0,
-            flash: 0.0,
-            kick: 0.0,
+            warp: DEFAULT_WARP,
+            hue: DEFAULT_HUE,
+            zoom: DEFAULT_ZOOM,
+            glow: DEFAULT_GLOW,
+            flash: DEFAULT_FLASH,
         }
     }
-}
-
-/// Perceptual lift of a raw band mean: gain, clamp, sqrt so quiet content
-/// still registers.
-fn shape(level: f32) -> f32 {
-    (level * BAND_GAIN).clamp(0.0, 1.0).sqrt()
 }
 
 impl Scene for FragmentFieldScene {
@@ -224,29 +203,32 @@ impl Scene for FragmentFieldScene {
         "fragment field"
     }
 
-    fn update(&mut self, frame: &AnalysisFrame) {
-        self.time += SCENE_DT;
+    fn set_time(&mut self, time: f32) {
+        self.time = time;
+    }
 
-        // The analyzer's real band energies, perceptually shaped.
-        let bass = shape(frame.bass);
-        let mid = shape(frame.mid);
-        let treb = shape(frame.treb);
-        let energy = shape((frame.bass + frame.mid + frame.treb) / 3.0);
+    fn reset_params(&mut self) {
+        self.warp = DEFAULT_WARP;
+        self.hue = DEFAULT_HUE;
+        self.zoom = DEFAULT_ZOOM;
+        self.glow = DEFAULT_GLOW;
+        self.flash = DEFAULT_FLASH;
+    }
 
-        // Attack instantly, decay smoothly — the sibling scenes' envelope feel.
-        self.bass = bass.max(self.bass * DECAY);
-        self.mid = mid.max(self.mid * DECAY);
-        self.treb = treb.max(self.treb * DECAY);
-        self.energy = energy.max(self.energy * DECAY);
+    fn set_param(&mut self, name: &str, value: f32) {
+        match name {
+            "warp" => self.warp = value,
+            "hue" => self.hue = value,
+            "zoom" => self.zoom = value,
+            "glow" => self.glow = value,
+            "flash" => self.flash = value,
+            _ => {}
+        }
+    }
 
-        self.flash = (frame.onset * ONSET_FLASH_GAIN)
-            .clamp(0.0, 1.0)
-            .max(self.flash * DECAY);
-        self.kick = if frame.beat {
-            1.0
-        } else {
-            self.kick * KICK_DECAY
-        };
+    fn update(&mut self, _frame: &AnalysisFrame) {
+        // Fully parameter-driven; the analysis reaches this scene only through
+        // the preset expressions bound to its parameters.
     }
 
     fn render(
@@ -257,8 +239,8 @@ impl Scene for FragmentFieldScene {
         aspect: f32,
     ) {
         let params = Params {
-            misc: [self.time, aspect.max(0.1), self.flash, self.kick],
-            bands: [self.bass, self.mid, self.treb, self.energy],
+            a: [self.time, aspect.max(0.1), self.warp, self.hue],
+            b: [self.zoom, self.glow, self.flash, 0.0],
         };
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&params));
 
