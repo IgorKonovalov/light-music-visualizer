@@ -12,4 +12,5 @@
 pub mod audio;
 pub mod dsp;
 pub mod ffi;
+pub mod preset;
 pub mod render;

@@ -30,3 +30,8 @@ wgpu = "=30.0.0"
 pollster = "=1.0.1"
 # Safe [f32] -> [u8] casts for uniform uploads. Zero deps.
 bytemuck = { version = "=1.25.2", features = ["derive"] }
+# Preset data layer (ADR-0002): derive-deserialize the small TOML preset schema.
+# serde is the de-facto standard and toml's own dependency; derive keeps the
+# schema declarative. Both pinned exact per NFR 4.
+serde = { version = "=1.0.229", features = ["derive"] }
+toml = "=1.1.3"
