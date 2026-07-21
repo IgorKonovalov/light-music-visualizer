@@ -1,0 +1,26 @@
+# NFR section 7: build, test, clippy, fmt on Windows + macOS for every push.
+# GPU rendering and live audio are out of CI scope - those checks stay manual.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      # rustup on the runner auto-installs the toolchain pinned in rust-toolchain.toml.
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo fmt --all --check
