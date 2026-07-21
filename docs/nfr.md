@@ -104,3 +104,25 @@ All four are v1 requirements, delivered as their own plan after the Plan 0001 MV
 - Multi-monitor choice (pick the display to fullscreen on).
 - Always-on-top / mini mode.
 - Settings persistence (last scene, window size/position/mode, quality tier — small config file).
+
+## 12. Runtime memory (added 2026-07-21, from the Plan 0001 close review)
+
+"Lightweight" (NFR §4) capped *binary* size but said nothing about *working set*. The Plan 0001
+standalone measured **~200 MB** resident during normal rendering, which is out of keeping with
+the goal on the iGPU baseline (§2).
+
+- **Target: standalone steady-state working set well under ~100 MB** at 1080p on the baseline
+  hardware, idle or rendering. Rough target, tuned when the reduction work lands — the point is
+  a large reduction from ~200 MB, not a precise number.
+- **Our own state is already small** (<~1 MB: ring buffer ~340 ms of f32, fixed DSP buffers,
+  a few uniform buffers). The footprint is almost entirely the GPU stack.
+- **Primary lever:** compile wgpu with only the per-OS backend feature — DX12 on Windows, Metal
+  on macOS. The current build carries the Vulkan/GL paths as well, which is dead weight on the
+  shipped target.
+- **Secondary levers:** swapchain frame-latency / buffer count, and avoiding redundant device
+  resources across scenes.
+- **Measurement, not vibes:** the reduction work states before/after resident set on the
+  baseline box as its done-when; the backend-trim must not regress the §1 performance floor.
+
+This is a follow-up plan's work, slotted into the roadmap in `docs/plans/README.md`; it is not a
+Plan 0001 blocker.
