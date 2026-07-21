@@ -19,6 +19,7 @@ pub mod fragment_field;
 pub mod pulse;
 pub mod spectrum;
 pub mod starfield;
+pub mod swarm;
 
 use crate::dsp::AnalysisFrame;
 
@@ -51,6 +52,7 @@ pub(crate) fn create_all(
             device,
             surface_format,
         )),
+        Box::new(swarm::SwarmScene::new(device, surface_format)),
         Box::new(spectrum::SpectrumScene::new(device, surface_format)),
         Box::new(pulse::PulseScene::new(device, surface_format)),
         Box::new(starfield::StarfieldScene::new(device, surface_format)),
