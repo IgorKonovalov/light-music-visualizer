@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// The panic-denial header every core hot-path module must carry. Copy it
 /// verbatim to the top of any new file under `src/dsp/`, `src/render/`,
-/// `src/ffi.rs`, or `src/audio.rs`:
+/// `src/ffi.rs`, `src/audio.rs`, or `src/preset/expr.rs`:
 ///
 /// ```ignore
 /// #![deny(
@@ -57,6 +57,10 @@ fn hot_path_modules_carry_the_panic_pragma() {
         src.join("render"),
         src.join("ffi.rs"),
         src.join("audio.rs"),
+        // Per-frame preset evaluator (Plan 0003): a single hot-path file inside
+        // an otherwise load-time module, so it is listed directly rather than
+        // scanning all of `src/preset/`.
+        src.join("preset").join("expr.rs"),
     ];
 
     let mut files = Vec::new();

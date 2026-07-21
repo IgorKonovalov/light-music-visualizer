@@ -16,9 +16,9 @@
 //! expression is total, panic-free, and allocation-free — it walks a prebuilt
 //! AST returning `f32`, so it is safe to call every frame (hot-path §5).
 
-// Hot-path panic-denial pragma: `eval` runs per parameter per frame. Preset/
-// is not yet in the hygiene guard's scan (an architect/Mode-4 call); armed
-// here so the per-frame evaluator is panic-denied regardless.
+// Hot-path panic-denial pragma: `eval` runs per parameter per frame. This file
+// is a named target in the hygiene guard's scan (tests/hygiene.rs), so the
+// pragma is enforced here even though the rest of preset/ is load-time only.
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,

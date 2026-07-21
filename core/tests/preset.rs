@@ -4,30 +4,46 @@
 //! with its bindings intact.
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 use lmv_core::preset::{Preset, SystemKind, Variables, compile};
 
-/// Global allocator that counts allocation calls, so a test can assert that a
-/// region performs no heap allocation.
+/// Global allocator that counts allocation calls **per thread**, so a test can
+/// assert that a region on the current thread performs no heap allocation,
+/// independent of what other tests are doing in parallel. A process-global
+/// counter would fold in concurrent tests' allocations and fail under stock
+/// multi-threaded `cargo test` (it only passed under nextest's process-per-test
+/// isolation); the thread-local counter holds under both runners.
 struct Counting;
 
-static ALLOCS: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Allocations charged to the current thread. `const`-initialized so the
+    /// first touch neither allocates nor registers a destructor — the allocator
+    /// can read it without re-entering itself.
+    static ALLOCS: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Allocations counted on the current thread so far.
+fn alloc_count() -> usize {
+    ALLOCS.with(|c| c.get())
+}
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::SeqCst);
+        // `try_with`: a no-op if TLS is unavailable (thread teardown), never a
+        // panic or an allocation on the alloc path.
+        let _ = ALLOCS.try_with(|c| c.set(c.get() + 1));
         unsafe { System.alloc(layout) }
     }
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         unsafe { System.dealloc(ptr, layout) }
     }
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::SeqCst);
+        let _ = ALLOCS.try_with(|c| c.set(c.get() + 1));
         unsafe { System.alloc_zeroed(layout) }
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        ALLOCS.fetch_add(1, Ordering::SeqCst);
+        let _ = ALLOCS.try_with(|c| c.set(c.get() + 1));
         unsafe { System.realloc(ptr, layout, new_size) }
     }
 }
@@ -116,12 +132,12 @@ fn compiled_eval_performs_no_heap_allocation() {
     // Warm up (touch any lazy statics before measuring).
     let _ = e.eval(&v);
 
-    let before = ALLOCS.load(Ordering::SeqCst);
+    let before = alloc_count();
     let mut acc = 0.0f32;
     for _ in 0..10_000 {
         acc += e.eval(&v);
     }
-    let after = ALLOCS.load(Ordering::SeqCst);
+    let after = alloc_count();
 
     assert!(acc.is_finite(), "sanity: evaluation produced a real number");
     assert_eq!(
