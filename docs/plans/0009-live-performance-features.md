@@ -1,6 +1,6 @@
 # 0009 — Live performance features (standalone)
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev, human
 > **Related ADRs:** none (standalone-only; the C ABI stays frozen — see Decision)
