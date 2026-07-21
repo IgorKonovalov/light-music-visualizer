@@ -1,6 +1,6 @@
 # Plan 0001 — Core + standalone MVP, then foobar parity
 
-**Status:** approved (2026-07-21 — re-validated against the live-show NFRs and ADR-0002)
+**Status:** in-progress (2026-07-21 — re-validated against the live-show NFRs and ADR-0002)
 **Related:** [ADR-0001](../adrs/0001-rust-core-wgpu-cabi-foobar-shim.md),
 [ADR-0002](../adrs/0002-layered-preset-architecture.md) (constrains Phase 5),
 [NFRs](../nfr.md)
@@ -40,7 +40,8 @@ commit with a concrete "done when". The `**Area:**` note orients the reader
   "cdylib", "staticlib"]`), `standalone/` (binary crate depending on `core`), and a
   placeholder `plugin-foobar/` directory (empty for now, real work in Phase 8). Add a Rust
   `.gitignore` (`/target`), pin toolchain, set exact-version deps. Release profile per
-  NFR §4: LTO on, strip symbols.
+  NFR §4: LTO on, strip symbols. Set `license = "MIT OR Apache-2.0"` in each crate's
+  `Cargo.toml` (SPDX form) to match the repo's dual `LICENSE-MIT` / `LICENSE-APACHE`.
 - **Files touched:** `Cargo.toml` (workspace), `core/Cargo.toml`, `core/src/lib.rs`,
   `standalone/Cargo.toml`, `standalone/src/main.rs`, `.gitignore`, `rust-toolchain.toml`.
 - **Done when:** `cargo build` succeeds; `cargo run -p standalone` opens an empty window

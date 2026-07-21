@@ -1,0 +1,15 @@
+# The shared brain: DSP + render engine + scenes (ADR-0001).
+# Package is named lmv-core because plain "core" collides with the std `core` crate.
+[package]
+name = "lmv-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "lmv_core"
+# rlib for the standalone (native Rust), cdylib/staticlib for the foobar C++ shim (C ABI).
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]

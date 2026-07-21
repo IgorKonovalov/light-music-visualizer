@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["core", "standalone"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/eastsphere/light-music-visualizer"
+
+# NFR section 4: small release binaries - LTO on, symbols stripped.
+[profile.release]
+lto = "fat"
+strip = "symbols"
+codegen-units = 1
