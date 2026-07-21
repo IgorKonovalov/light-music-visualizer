@@ -1,6 +1,12 @@
 # 0003 — Generative scenes + data-driven presets
 
-> **Status:** in-progress
+> **Status:** done (2026-07-21) — Phases 0-5 landed (commits `ae2c035..df16c48`); passed Mode 4
+> review, no blockers. Verified: `cargo nextest run` 22/22 green, `cargo test` green, clippy
+> `-D warnings` clean; DSP determinism (bit-exact incl. bpm/bar), frequency-correct band split,
+> and ±3 BPM tempo on a synthetic click train all asserted; zero-alloc expression eval proven;
+> source-agnostic core and the C ABI surface unchanged. Two dev fixes at close (`6b7135b`):
+> thread-isolated the zero-alloc guard so both `cargo test` and nextest pass, and brought
+> `preset/expr.rs` under the hygiene guard.
 > **Amended 2026-07-21:** added **Phase 0** (relocate the existing scenes to
 > `core/src/render/scenes/` and bring them under the hot-path panic-pragma guard), folding in the
 > Plan 0002 Mode 4 review gap — scenes were per-frame render code outside the pragma set. All new
@@ -8,7 +14,7 @@
 > existing recursive `src/render/` scan.
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
-> **Related ADRs:** [ADR-0002](../adrs/0002-layered-preset-architecture.md) — this plan
+> **Related ADRs:** [ADR-0002](../../adrs/0002-layered-preset-architecture.md) — this plan
 > implements its **layers 1–2** (data presets + expression language + built-in systems);
 > ADR-0002 is accepted at this plan's close ceremony.
 

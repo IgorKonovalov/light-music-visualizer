@@ -1,7 +1,10 @@
 # ADR-0002 — Layered preset architecture: data + expressions + optional script
 
-**Status:** proposed (2026-07-21) — pairs with the future preset-engine plan; accepted at
-that plan's close ceremony.
+**Status:** accepted (2026-07-21) — implemented by [Plan 0003](../plans/done/0003-generative-scenes-and-presets.md),
+which built **layers 1-2**: TOML data presets, the pure expression language, and the first two
+built-in systems (fragment field + ~10k CPU swarm). Layer 3 (Rhai orchestration), cross-preset
+blending, compute-scale particles, and the remaining built-in systems (feedback/warp, boids,
+walkers, 3D) stay deferred follow-ups.
 
 ## Context
 

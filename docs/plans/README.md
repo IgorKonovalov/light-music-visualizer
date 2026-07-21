@@ -9,12 +9,29 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0003](0003-generative-scenes-and-presets.md) | Generative scenes + data-driven presets | in-progress (paused) | **Paused mid-implementation by the user.** Shadertoy-style fragment-field scene + ~10k-particle CPU swarm, driven by TOML+expression presets (ADR-0002 layers 1-2). DSP enriched with bass/mid/treb + deterministic tempo/BPM. **Amended: adds Phase 0** (relocate scenes under `render/` + panic-pragma guard, closing the 0002 review gap). Defers Rhai, blending, compute-scale. Drafts roadmap item 1. |
 | [0004](0004-foobar-ui-element-panel.md) | foo_lmv as an embeddable Default UI panel | approved | Register a Default UI `ui_element` so the visualizer docks as a layout panel, not just a pop-out window. Keeps both entry points sharing one wgpu surface via a single claimable `VizSession`; right-click "Next scene"; throttle + pause-when-hidden. Plugin-only, no ABI change. Relates to roadmap item 4 (UX). |
 | [0005](0005-miri-ring-extraction.md) | Extract the lock-free ring into a wgpu-free crate for Miri | approved | Implements Plan 0002's deferred Phase 5: pull the SPSC ring out of `core/src/audio.rs` into a zero-dep `lmv-ring` crate, then run `cargo +nightly miri test -p lmv-ring` as a fast CI UB gate (no wgpu graph to compile). Rejected feature-gating wgpu in `lmv-core`. Behavior-preserving. |
 
 ## Recently closed
 
+- [0003 — Generative scenes + data-driven presets](done/0003-generative-scenes-and-presets.md) —
+  **done 2026-07-21**, passed Mode 4 review (no blockers). Phases 0-5 landed (commits
+  `ae2c035..df16c48`): scenes relocated under `render/` + brought under the panic-pragma guard
+  (closing the 0002 review gap), a fragment-field system and a ~10k CPU particle swarm, DSP
+  enriched with bass/mid/treb bands + a deterministic hop-clock tempo/BPM, a pure
+  allocation-free expression evaluator, and TOML presets driving both systems with disk
+  hot-reload. Implements **[ADR-0002](../adrs/0002-layered-preset-architecture.md) layers 1-2**
+  (now **accepted**). Two review fixes at close (`6b7135b`): thread-isolated the zero-alloc test
+  so both `cargo test` and nextest pass, and added `preset/expr.rs` to the hygiene guard.
+  **⚠ Carry-forward (minor, non-blocking):**
+  1. The three legacy scenes (spectrum/pulse/starfield) stay compiled and constructed but no
+     preset addresses them - a cleanup candidate (delete, or expose via a `SystemKind`).
+  2. Phase 3's iGPU 60 fps @ 1080p validation (NFR 1/9) and the Phases 1/3/5 "visibly flows and
+     reacts" done-whens are runtime/hardware checks, not verifiable in review - confirm on the
+     iGPU test PC when available.
+  **Deferred follow-ups (tracked in the closed plan):** Rhai orchestration (layer 3),
+  cross-preset blending, a compute-shader particle path for thousands-scale, additional built-in
+  systems (feedback/warp, boids, walkers, 3D), and exposing preset selection across the C ABI.
 - [0006 — Versioning: single source of truth + cargo-release + surfacing](done/0006-versioning-wiring.md) —
   **done 2026-07-21**, passed Mode 4 review (no blockers, no majors). Implements
   [ADR-0005](../adrs/0005-versioning-and-release-cadence.md) (now **accepted**): one
@@ -65,8 +82,8 @@ Execution order after Plan 0001, per the NFR interviews ([docs/nfr.md](../nfr.md
    driving built-in systems (feedback/warp, boids, walkers/growth, 3D scene), with an
    optional budgeted Rhai script for staged per-track arcs (NFR §10). Replaces "scenes are
    Rust code" — Plan 0001's Scene trait becomes the rendering vocabulary presets drive, so
-   keep it thin. **Started as [Plan 0003](0003-generative-scenes-and-presets.md)** (layers 1-2:
-   fragment-field + swarm systems, data + expression presets); Rhai (layer 3), blending, and
+   keep it thin. **Delivered by [Plan 0003](done/0003-generative-scenes-and-presets.md)** (layers
+   1-2: fragment-field + swarm systems, data + expression presets); Rhai (layer 3), blending, and
    compute-scale particles remain follow-ups tracked in 0003.
 2. **Live performance features** — line-in/audio-interface capture, scene triggers
    (auto-rotate + hotkey/MIDI + experimental track-change detection), fullscreen on a
