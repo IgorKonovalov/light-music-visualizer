@@ -14,3 +14,16 @@ path = "src/main.rs"
 lmv-core = { path = "../core" }
 # Windowing (ADR-0001 fixes winit for the standalone shell).
 winit = "=0.30.13"
+
+# WASAPI loopback capture. Narrow feature set keeps the transitive cost low;
+# winit already pulls windows-sys, so the ecosystem dependency is a sunk cost.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_KernelStreaming",
+    "Win32_Media_Multimedia",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+] }
