@@ -15,10 +15,12 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 Execution order after Plan 0001, per the NFR interviews ([docs/nfr.md](../nfr.md)):
 
-1. **Preset / scripting engine** — MilkDrop-akin preset files + optional scripting for
-   staged per-track arcs and generative systems (NFR §10). Shape under exploration; needs
-   an ADR first. Replaces "scenes are Rust code" — Plan 0001's Scene trait becomes the
-   rendering vocabulary presets drive, so keep it thin.
+1. **Preset / scripting engine** — layered presets per
+   [ADR-0002](../adrs/0002-layered-preset-architecture.md): TOML data + expression language
+   driving built-in systems (feedback/warp, boids, walkers/growth, 3D scene), with an
+   optional budgeted Rhai script for staged per-track arcs (NFR §10). Replaces "scenes are
+   Rust code" — Plan 0001's Scene trait becomes the rendering vocabulary presets drive, so
+   keep it thin.
 2. **Live performance features** — line-in/audio-interface capture, scene triggers
    (auto-rotate + hotkey/MIDI + experimental track-change detection), fullscreen on a
    chosen display/projector, 4-hour soak stability (NFR §10).
