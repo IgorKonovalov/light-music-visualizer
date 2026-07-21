@@ -56,6 +56,12 @@ impl AppState {
         let analyzer = Analyzer::new(format)
             .expect("capture layer already validated this format at the boundary");
 
+        // Frame pacing is a shell concern; the core stays clock-free (determinism).
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "FPS-window start; wall-clock pacing lives in the shell, not core analysis"
+        )]
+        let fps_window_start = Instant::now();
         Self {
             window,
             renderer,
@@ -64,7 +70,7 @@ impl AppState {
             _capture: capture,
             scratch: vec![0.0; 32_768],
             occluded: false,
-            fps_window_start: Instant::now(),
+            fps_window_start,
             fps_frames: 0,
         }
     }
@@ -101,6 +107,10 @@ impl AppState {
         self.window.request_redraw();
     }
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "FPS accounting reads the wall clock; core analysis stays clock-free"
+    )]
     fn count_frame(&mut self) {
         self.fps_frames += 1;
         let elapsed = self.fps_window_start.elapsed();
@@ -247,6 +257,10 @@ impl ApplicationHandler for App {
         }
     }
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "hidden-window wake deadline; shell frame pacing, not core analysis"
+    )]
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let Some(state) = self.state.as_mut() else {
             return;

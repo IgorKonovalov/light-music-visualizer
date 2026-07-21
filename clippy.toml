@@ -1,0 +1,20 @@
+# Determinism gate (NFR section 6 / CLAUDE.md "Determinism where it's
+# testable"): analysis code is a pure function of its input - no wall-clock
+# reads, no unseeded RNG. clippy config is per-run, not per-crate, so the ban
+# is global: core must be clock-free (scenes receive time/seed from the
+# caller), and the shells' few legitimate frame-pacing reads each carry a
+# grep-able #[allow(clippy::disallowed_methods, reason = "...")].
+#
+# rand::random / rand::thread_rng belong here too once `rand` becomes a
+# dependency; unresolved paths are skipped, so they are added with rand, not now.
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "no wall-clock in analysis; pass time in from the caller (determinism)" },
+    { path = "std::time::Instant::elapsed", reason = "no wall-clock in analysis; pass time in from the caller (determinism)" },
+    { path = "std::time::SystemTime::now", reason = "no wall-clock in analysis; pass time in from the caller (determinism)" },
+]
+
+# The Phase-2 hot-path panic pragma (#![deny(unwrap_used/expect_used/panic)])
+# must never fight idiomatic test code, where unwrap/expect/panic are fine.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

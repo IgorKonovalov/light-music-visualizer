@@ -147,6 +147,10 @@ fn analysis_is_deterministic() {
 }
 
 #[test]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "perf smoke test deliberately times execution; the analysis under test stays clock-free"
+)]
 fn one_hop_analyzes_well_under_the_hop_interval() {
     let mut analyzer = mono_analyzer();
     let signal = sine(440.0, 0.5, WINDOW_SIZE + 1000 * HOP_SIZE);
