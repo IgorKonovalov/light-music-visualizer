@@ -1,6 +1,6 @@
 # 0004 — foo_lmv as an embeddable Default UI panel
 
-> **Status:** approved
+> **Status:** in-progress
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
 > **Related ADRs:** none (no C ABI change — see Decision)
