@@ -49,6 +49,8 @@ core/                # Rust library crate — the shared brain. DSP + render eng
 standalone/          # Rust binary crate — winit window + wgpu surface + OS loopback capture.
 plugin-foobar/       # C++ shim: foobar2000 SDK integration, links core's C ABI. Windows-first.
 docs/
+├── nfr.md           # Quantified v1 non-functional requirements — the numbers behind every
+│                    #   "lightweight" / "real-time" / "stable frame rate" in the plans.
 ├── adrs/            # NNNN-<slug>.md — architecture decisions + rejected alternatives. Append-only.
 │   └── README.md    #   ADR index
 └── plans/           # NNNN-<slug>.md — phased implementation plans (what's in flight)

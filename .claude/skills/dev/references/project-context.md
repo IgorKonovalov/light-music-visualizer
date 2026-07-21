@@ -35,8 +35,8 @@ All four of build / test / clippy / fmt-check must be green before you commit a 
 phase's done-when says otherwise.
 
 **foobar plugin (Windows, C++):** built under `plugin-foobar/` with its own project/toolchain,
-linking the core's staticlib + generated header. The exact invocation is pinned when Plan 0001
-phase 6 lands — read that phase and the plugin's README rather than guessing.
+linking the core's staticlib + generated header. The exact invocation is pinned when Plan 0001's
+plugin phase lands — read that phase and the plugin's README rather than guessing.
 
 ## Ownership map
 
@@ -59,3 +59,6 @@ architect at the end.
   randomness.
 - **C ABI is a contract** — minimal, versioned, explicit ownership/lifetimes; don't let Rust
   panics cross FFI as UB (catch at the boundary, return an error code).
+- **Quantified NFRs live in `docs/nfr.md`** — 60 fps @ 1080p floor, < 60 ms audio→visual
+  latency, ~10 MB soft size cap, callback safety rules. Plans cite it by section; when a
+  done-when names a number, that file is where it comes from.

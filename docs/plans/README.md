@@ -9,7 +9,20 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | draft  | Workspace → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar plugin → mac capture. |
+| [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | draft  | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Bars come from [docs/nfr.md](../nfr.md). |
+
+## Roadmap (agreed 2026-07-21, numbers assigned when drafted)
+
+Execution order after Plan 0001, per the NFR interview ([docs/nfr.md](../nfr.md)):
+
+1. **Adaptive quality** — scene quality tiers + frame-time governor so every scene holds
+   60 fps on the iGPU baseline (NFR §1). Validated on the older iGPU test PC.
+2. **v1 UX** — fullscreen toggle, multi-monitor choice, always-on-top / mini mode, settings
+   persistence (NFR §10).
+3. **Packaging & release** — GitHub release zip: unsigned standalone exe +
+   `.fb2k-component` (NFR §8).
+
+Later, unordered: better tempo tracking, user-authored scenes/presets, signed installer.
 
 ## Conventions
 

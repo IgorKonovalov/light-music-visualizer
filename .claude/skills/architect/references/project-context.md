@@ -57,6 +57,14 @@ foobar plugin (Windows, C++): built with its own project/toolchain under `plugin
 the core's staticlib + generated header. The exact build invocation is pinned when Plan 0001
 phase 6 lands — check that plan / the plugin's README.
 
+## Non-functional requirements
+
+**[docs/nfr.md](../../../docs/nfr.md)** holds the quantified v1 NFRs (agreed 2026-07-21):
+adaptive quality with a 60 fps @ 1080p iGPU floor, Win10 1903+ / macOS 13+ baseline,
+< 60 ms audio→visual latency, ~10 MB soft size cap, CI from the start, GitHub-zip
+distribution, and the confirmed v1 UX scope. Plans reference these by section; a done-when
+that contradicts that file is a plan bug.
+
 ## Decisions on the record
 
 - **[ADR-0001](../../../docs/adrs/0001-rust-core-wgpu-cabi-foobar-shim.md)** (accepted) — Rust
