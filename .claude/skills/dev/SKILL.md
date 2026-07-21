@@ -74,7 +74,7 @@ Wait for an explicit affirmative: **"go"**, **"proceed"**, **"yes do it"**, **"s
 skip the mac phase"), incorporate and confirm back in one sentence.
 
 While waiting you may read more files, but **do not write or edit anything**. When the gate
-opens, flip the plan's `Status:` from `draft` to `in-progress` if it currently says `draft` —
+opens, flip the plan's `Status:` to `in-progress` if it currently says `draft` or `approved` —
 that's the one plan edit you're allowed (mechanical bookkeeping). Touch nothing else in the plan.
 
 ### Step 3 — Implement and validate, phase by phase

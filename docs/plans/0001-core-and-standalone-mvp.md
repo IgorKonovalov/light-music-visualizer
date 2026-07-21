@@ -1,7 +1,9 @@
 # Plan 0001 — Core + standalone MVP, then foobar parity
 
-**Status:** draft
-**Related:** [ADR-0001](../adrs/0001-rust-core-wgpu-cabi-foobar-shim.md), [NFRs](../nfr.md)
+**Status:** approved (2026-07-21 — re-validated against the live-show NFRs and ADR-0002)
+**Related:** [ADR-0001](../adrs/0001-rust-core-wgpu-cabi-foobar-shim.md),
+[ADR-0002](../adrs/0002-layered-preset-architecture.md) (constrains Phase 5),
+[NFRs](../nfr.md)
 
 ## TL;DR
 
@@ -97,7 +99,10 @@ commit with a concrete "done when". The `**Area:**` note orients the reader
 - **Area:** core + standalone (input)
 - **What:** A `Scene` trait (init/update/render given `AnalysisFrame`), a registry, and 2-3
   scenes total including at least one beat/onset-driven one. Hotkey to cycle scenes in the
-  standalone. Any visual randomness is explicitly seeded (NFR §6).
+  standalone. Any visual randomness is explicitly seeded (NFR §6). **Keep the trait thin and
+  crate-internal**: per ADR-0002 it later becomes the vocabulary the preset engine drives,
+  not a public extension point — no plugin registration, no dynamic dispatch beyond what
+  scene cycling needs.
 - **Files touched:** `core/src/scenes/mod.rs`, `core/src/scenes/*.rs`,
   `standalone/src/main.rs` (input → scene switch).
 - **Done when:** User can cycle through ≥2 scenes live; at least one visibly reacts to
@@ -186,6 +191,9 @@ flowchart LR
 
 ## What this plan does NOT do
 
+- No preset engine, expression language, or Rhai scripting (ADR-0002's plan comes next).
+- No line-in / audio-interface capture and no scene triggers (auto-rotate, MIDI,
+  track-change detection) — those land in the live-performance plan (NFR §10).
 - No adaptive quality tiers / frame-time governor (follow-up plan; MVP is fixed-quality).
 - No v1 UX features — fullscreen, multi-monitor, always-on-top, settings persistence
   (confirmed v1 requirements, but their own follow-up plan).

@@ -9,7 +9,7 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | draft  | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Bars come from [docs/nfr.md](../nfr.md). |
+| [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | approved | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Bars come from [docs/nfr.md](../nfr.md). |
 
 ## Roadmap (agreed 2026-07-21, revised same day for the live-show use case; numbers assigned when drafted)
 
@@ -43,6 +43,7 @@ Later, unordered: better tempo tracking, preset sharing/library, signed installe
   `**Area:**` note (`core` / `standalone` / `plugin`) orients the reader but is not the tag.
 - **Skills:** `architect` designs and owns `docs/`; `dev` implements all code. `architect`
   writes and closes plans; `dev` flips `draft → in-progress` at "go" and nothing else in the file.
-- **Lifecycle:** `draft` → `in-progress` → `done` (then `git mv` to `done/` and drop from
-  this roster). Review happens at plan end, in a fresh `/architect` session — not by the
-  session that wrote the code.
+- **Lifecycle:** `draft` → `approved` (user/architect validated it; ready for `dev`) →
+  `in-progress` → `done` (then `git mv` to `done/` and drop from this roster). Review
+  happens at plan end, in a fresh `/architect` session — not by the session that wrote
+  the code.
