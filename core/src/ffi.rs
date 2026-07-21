@@ -4,7 +4,7 @@
 //! `core/include/lmv_core.h` separately from this crate, so any change to the
 //! shape of these functions is an ADR-worthy event, not a casual edit. Keep
 //! it minimal: create/free, push samples, attach window, render, resize,
-//! cycle scene, version query.
+//! cycle scene, load presets, version query.
 //!
 //! # Threading contract (mirrored in the header)
 //! - `lmv_push_samples` is called from at most one thread at a time (the
@@ -34,10 +34,12 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::audio::{AudioFormat, SampleConsumer, SampleProducer, intake};
 use crate::dsp::Analyzer;
+use crate::preset::{self, Preset};
 use crate::render::Renderer;
 
-/// Bump on any ABI shape change (with the accompanying ADR).
-pub const LMV_ABI_VERSION: u32 = 1;
+/// Bump on any ABI shape change (with the accompanying ADR). v2 added
+/// `lmv_load_presets` (ADR-0006).
+pub const LMV_ABI_VERSION: u32 = 2;
 
 /// Call succeeded.
 pub const LMV_OK: i32 = 0;
@@ -62,6 +64,10 @@ struct RenderState {
     analyzer: Analyzer,
     renderer: Option<Renderer>,
     scratch: Vec<f32>,
+    /// Presets from `lmv_load_presets` called before a window was attached;
+    /// installed on the renderer as soon as `lmv_attach_window` creates it.
+    /// Empty once installed (or if load always followed attach).
+    pending_presets: Vec<Preset>,
 }
 
 /// Opaque to C. The two `UnsafeCell`s implement the documented two-thread
@@ -101,6 +107,7 @@ pub extern "C" fn lmv_create(sample_rate: u32, channels: u16) -> *mut LmvHandle 
                 analyzer,
                 renderer: None,
                 scratch: vec![0.0; 32_768],
+                pending_presets: Vec::new(),
             }),
         }))
     })
@@ -179,8 +186,12 @@ pub unsafe extern "C" fn lmv_attach_window(
         };
         catch_unwind(AssertUnwindSafe(|| {
             match unsafe { Renderer::new_from_win32_hwnd(hwnd, width, height) } {
-                Ok(renderer) => {
+                Ok(mut renderer) => {
                     let state = unsafe { &mut *handle.render.get() };
+                    // Apply any presets loaded before the window existed.
+                    if !state.pending_presets.is_empty() {
+                        renderer.set_presets(std::mem::take(&mut state.pending_presets));
+                    }
                     state.renderer = Some(renderer);
                     LMV_OK
                 }
@@ -270,6 +281,51 @@ pub unsafe extern "C" fn lmv_cycle_scene(handle: *mut LmvHandle) -> i32 {
             }
             None => LMV_ERR_NO_WINDOW,
         }
+    }))
+    .unwrap_or(LMV_ERR_PANIC)
+}
+
+/// Seed `path` with the embedded curated presets (writing only files that are
+/// absent, never overwriting), then load every valid preset found there and
+/// install it as this handle's preset set. Returns the number of presets loaded
+/// (`>= 0`), or a negative `LMV_ERR_*` code (null handle/path, invalid UTF-8).
+/// A directory with no valid presets keeps the current set (degrade, never
+/// crash). The seed step is idempotent — safe to call on every host start. If
+/// no window is attached yet, the loaded set is applied when `lmv_attach_window`
+/// next creates the renderer.
+///
+/// # Safety
+/// `handle` valid per `lmv_create`; `path_utf8` points at `path_len` bytes of
+/// UTF-8 text. Render-thread role only.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lmv_load_presets(
+    handle: *mut LmvHandle,
+    path_utf8: *const u8,
+    path_len: usize,
+) -> i32 {
+    if handle.is_null() || path_utf8.is_null() {
+        return LMV_ERR_INVALID_ARG;
+    }
+    let handle = unsafe { &*handle };
+    catch_unwind(AssertUnwindSafe(|| {
+        let bytes = unsafe { std::slice::from_raw_parts(path_utf8, path_len) };
+        let Ok(path_str) = std::str::from_utf8(bytes) else {
+            return LMV_ERR_INVALID_ARG;
+        };
+        let path = std::path::Path::new(path_str);
+        // Seeding is best-effort: a read-only or otherwise unusable directory
+        // still loads whatever is already present rather than failing the call.
+        let _ = preset::seed_dir(path);
+        let report = preset::load_dir(path);
+        let count = report.presets.len() as i32;
+        let state = unsafe { &mut *handle.render.get() };
+        match state.renderer.as_mut() {
+            // set_presets ignores an empty set, so an empty dir keeps the
+            // current roster.
+            Some(renderer) => renderer.set_presets(report.presets),
+            None => state.pending_presets = report.presets,
+        }
+        count
     }))
     .unwrap_or(LMV_ERR_PANIC)
 }

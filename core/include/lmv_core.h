@@ -21,13 +21,14 @@
 #ifndef LMV_CORE_H
 #define LMV_CORE_H
 
+#include <stddef.h> /* size_t */
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define LMV_ABI_VERSION 1u
+#define LMV_ABI_VERSION 2u
 
 /* Result codes (0 success, negative failure). */
 #define LMV_OK 0
@@ -76,6 +77,19 @@ int32_t lmv_resize(LmvHandle *handle, uint32_t width, uint32_t height);
 
 /* Advance to the next built-in scene (same roster as the standalone). */
 int32_t lmv_cycle_scene(LmvHandle *handle);
+
+/*
+ * Seed `path_utf8` (a directory, `path_len` bytes of UTF-8, not
+ * NUL-terminated) with the embedded curated presets, writing only files that
+ * are absent (never overwriting user edits), then load every valid preset
+ * found there and install it as this handle's preset set. lmv_cycle_scene then
+ * cycles the loaded set. Returns the number of presets loaded (>= 0), or a
+ * negative LMV_ERR_* (invalid arg on a null handle/path or non-UTF-8 path). A
+ * directory with no valid presets keeps the current set. The seed step is
+ * idempotent - safe to call once on every host start. Added in ABI v2.
+ */
+int32_t lmv_load_presets(LmvHandle *handle, const uint8_t *path_utf8,
+                         size_t path_len);
 
 #ifdef __cplusplus
 } /* extern "C" */
