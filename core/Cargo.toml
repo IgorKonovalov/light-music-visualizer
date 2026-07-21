@@ -13,3 +13,6 @@ name = "lmv_core"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
+# FFT for the spectrum path. Pure Rust, ~5 transitive deps (num-* family),
+# no unsafe SIMD requirements — well under the NFR 4 dependency gate.
+rustfft = "=6.4.1"

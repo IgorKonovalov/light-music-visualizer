@@ -6,3 +6,4 @@
 //! no audio-source or platform types in this crate, ever.
 
 pub mod audio;
+pub mod dsp;
