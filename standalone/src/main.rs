@@ -19,6 +19,10 @@ use winit::window::{Window, WindowId};
 /// near-zero GPU in the background, analysis stays warm).
 const HIDDEN_TICK: Duration = Duration::from_millis(100);
 
+/// Window-title prefix: app name plus the application version. `CARGO_PKG_VERSION`
+/// resolves at compile time to the single [workspace.package].version (ADR-0005).
+const APP_TITLE: &str = concat!("light-music-visualizer ", env!("CARGO_PKG_VERSION"));
+
 struct AppState {
     window: Arc<Window>,
     renderer: Renderer,
@@ -118,7 +122,7 @@ impl AppState {
             let fps = self.fps_frames as f32 / elapsed.as_secs_f32();
             let scene = self.renderer.scene_name();
             self.window
-                .set_title(&format!("light-music-visualizer — {scene} — {fps:.0} fps"));
+                .set_title(&format!("{APP_TITLE} — {scene} — {fps:.0} fps"));
             self.fps_window_start = Instant::now();
             self.fps_frames = 0;
         }
@@ -201,7 +205,7 @@ impl ApplicationHandler for App {
         if self.state.is_none() {
             // 1080p default: the size the NFR 1 performance floor is quoted at.
             let attrs = Window::default_attributes()
-                .with_title("light-music-visualizer")
+                .with_title(APP_TITLE)
                 .with_inner_size(winit::dpi::PhysicalSize::new(1920u32, 1080u32));
             match event_loop.create_window(attrs) {
                 Ok(window) => {
@@ -248,9 +252,7 @@ impl ApplicationHandler for App {
                 ..
             } => {
                 let scene = state.renderer.cycle_scene();
-                state
-                    .window
-                    .set_title(&format!("light-music-visualizer — {scene}"));
+                state.window.set_title(&format!("{APP_TITLE} — {scene}"));
                 state.window.request_redraw();
             }
             _ => {}
