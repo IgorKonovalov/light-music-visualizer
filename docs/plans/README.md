@@ -11,18 +11,25 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 |------|-----------------------------------------|--------|---------|
 | [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | draft  | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Bars come from [docs/nfr.md](../nfr.md). |
 
-## Roadmap (agreed 2026-07-21, numbers assigned when drafted)
+## Roadmap (agreed 2026-07-21, revised same day for the live-show use case; numbers assigned when drafted)
 
-Execution order after Plan 0001, per the NFR interview ([docs/nfr.md](../nfr.md)):
+Execution order after Plan 0001, per the NFR interviews ([docs/nfr.md](../nfr.md)):
 
-1. **Adaptive quality** — scene quality tiers + frame-time governor so every scene holds
-   60 fps on the iGPU baseline (NFR §1). Validated on the older iGPU test PC.
-2. **v1 UX** — fullscreen toggle, multi-monitor choice, always-on-top / mini mode, settings
-   persistence (NFR §10).
-3. **Packaging & release** — GitHub release zip: unsigned standalone exe +
+1. **Preset / scripting engine** — MilkDrop-akin preset files + optional scripting for
+   staged per-track arcs and generative systems (NFR §10). Shape under exploration; needs
+   an ADR first. Replaces "scenes are Rust code" — Plan 0001's Scene trait becomes the
+   rendering vocabulary presets drive, so keep it thin.
+2. **Live performance features** — line-in/audio-interface capture, scene triggers
+   (auto-rotate + hotkey/MIDI + experimental track-change detection), fullscreen on a
+   chosen display/projector, 4-hour soak stability (NFR §10).
+3. **Adaptive quality** — quality tiers + frame-time governor for the 60 fps iGPU floor
+   (NFR §1). Validated on the older iGPU test PC.
+4. **Remaining v1 UX** — always-on-top / mini mode, settings persistence (NFR §11;
+   fullscreen/multi-monitor land earlier with live features).
+5. **Packaging & release** — GitHub release zip: unsigned standalone exe +
    `.fb2k-component` (NFR §8).
 
-Later, unordered: better tempo tracking, user-authored scenes/presets, signed installer.
+Later, unordered: better tempo tracking, preset sharing/library, signed installer.
 
 ## Conventions
 

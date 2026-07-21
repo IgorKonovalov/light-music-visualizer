@@ -73,7 +73,30 @@ contradicts this file is a plan bug — surface it, don't guess.
 | Mac, macOS 13+ | macOS standalone path (Metal + ScreenCaptureKit) — build/test is a human-in-the-loop step |
 | foobar2000 (installed) | Plugin loading + `visualisation_stream` behavior |
 
-## 10. v1 UX scope (confirmed requirements, post-MVP plan)
+## 10. Live performance (added in the 2026-07-21 follow-up interview)
+
+The primary real-world use is **live DJ shows**: the app renders to a projector/LED screen
+while a DJ mixes. This adds:
+
+- **Session stability:** no crash, leak, or visual degradation over a ≥ 4-hour continuous
+  session. A soak test becomes part of the live-features plan's done-when.
+- **Inputs (all three, core stays source-agnostic):** loopback (DJ software on the same
+  machine), **line-in via an audio interface** (cable from the mixer's booth/rec out — the
+  robust stage setup; needs a capture-device path alongside loopback), and the foobar plugin.
+- **Scene triggers, layered:** auto-rotate (MilkDrop-style timing, biased toward energy
+  shifts/drops) as the baseline; **manual trigger** (hotkey, MIDI worth exploring) as the
+  override; **best-effort track-change detection** (long-window spectral/tempo novelty) as an
+  experimental extra — never the only mechanism, since beatmatched blends have no hard boundary.
+- **Projector output is first-class:** fullscreen-on-chosen-display matters more than desk
+  UX; it moves early in the roadmap.
+- **Scenes are presets, not code (target state):** visualizations will be authored as
+  lightweight MilkDrop-akin preset files with an optional scripting layer for staged,
+  coherent per-track arcs and generative systems (walkers, flocks, 3D). Exact shape under
+  exploration; the decision will land as an ADR before the preset-engine plan is drafted.
+  Plan 0001's built-in Rust scenes remain the walking skeleton and later become the
+  rendering vocabulary presets drive.
+
+## 11. v1 UX scope (confirmed requirements, post-MVP plan)
 
 All four are v1 requirements, delivered as their own plan after the Plan 0001 MVP:
 
