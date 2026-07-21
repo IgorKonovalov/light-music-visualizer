@@ -3,11 +3,13 @@
 The one-minute "what's in flight" view. Read this first each session instead of
 re-deriving state from `git log`. Completed plans move to `done/`.
 
-**Next free number: 0007**
+**Next free number: 0008**
 
 ## Active roster
 
-_None in flight._ Take the next free number above when drafting the next plan.
+| Plan | Title                                   | Status | Summary |
+|------|-----------------------------------------|--------|---------|
+| [0007](0007-curated-preset-library.md) | Curated preset library: robust loading + seed-on-first-run + C ABI v2 | draft | Seed a per-user preset dir (`%APPDATA%\light-music-visualizer\presets`) with an embedded curated set (~8-12 presets) on first run, then load + hot-reload it; both frontends share the dir. foobar reaches parity via one new ABI function `lmv_load_presets` (ABI v2, [ADR-0006](../adrs/0006-c-abi-v2-preset-loading.md)). Selection stays cycle + title-bar; the in-app browse overlay + text rendering is split to Plan 0008. Delivers roadmap item 1's "preset library" thread + parts of item 5's install-readiness. |
 
 ## Recently closed
 
