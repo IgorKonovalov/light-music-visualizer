@@ -7,12 +7,23 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 ## Active roster
 
-| Plan | Title                                   | Status | Summary |
-|------|-----------------------------------------|--------|---------|
-| [0004](0004-foobar-ui-element-panel.md) | foo_lmv as an embeddable Default UI panel | approved | Register a Default UI `ui_element` so the visualizer docks as a layout panel, not just a pop-out window. Keeps both entry points sharing one wgpu surface via a single claimable `VizSession`; right-click "Next scene"; throttle + pause-when-hidden. Plugin-only, no ABI change. Relates to roadmap item 4 (UX). |
+_None in flight._ Take the next free number above when drafting the next plan.
 
 ## Recently closed
 
+- [0004 — foo_lmv as an embeddable Default UI panel](done/0004-foobar-ui-element-panel.md) —
+  **done 2026-07-21**, passed Mode 4 review (no blockers, no majors). All four phases landed in
+  `plugin-foobar/foo_lmv.cpp` (commits `ef9193f`, `be3f90c`, `49ed225`, `855ccba`): the file-scope
+  globals became one claimable `VizSession` (single `LmvHandle` + stream + pump + render timer); a
+  Default UI `ui_element` panel and the View pop-out both host the core through one HWND, sharing
+  the session so only one wgpu surface exists; ownership arbitration (400 ms poll) hands the session
+  to a still-open host when the owner frees, with a GDI placeholder for non-owners; "Next scene" via
+  right-click + Space; and a visibility/playback-driven cadence (full while playing+visible, ~6-7 fps
+  idle, timer off when hidden). **Plugin-only, no ADR** — diff touches only `foo_lmv.cpp`, the C ABI
+  is unchanged (`LMV_ABI_VERSION` still 1, only the pre-existing surface called), and the
+  single-`lmv_create` invariant is owner-gated on both create paths. Relates to roadmap item 4 (UX).
+  **⚠ Carry-forward:** all four done-whens are runtime checks in a live foobar2000 v2 — the code
+  implements each; behavioral confirmation is pending an on-device run.
 - [0005 — Extract the lock-free ring into a wgpu-free crate for Miri](done/0005-miri-ring-extraction.md) —
   **done 2026-07-21**, passed Mode 4 review (no blockers, no majors). Implements Plan 0002's
   deferred Phase 5. Phase 1 (`de0fe24`) pulled the SPSC ring — `RingShared`, `SampleProducer`,

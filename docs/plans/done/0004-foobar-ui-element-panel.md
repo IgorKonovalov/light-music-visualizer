@@ -1,9 +1,23 @@
 # 0004 — foo_lmv as an embeddable Default UI panel
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
 > **Related ADRs:** none (no C ABI change — see Decision)
+>
+> **Done 2026-07-21** — passed Mode 4 review (no blockers, no majors). All four phases landed
+> in `plugin-foobar/foo_lmv.cpp` (commits `ef9193f`, `be3f90c`, `49ed225`, `855ccba`): the
+> file-scope globals became a single claimable `VizSession` (one `LmvHandle` + stream + pump +
+> render timer); a Default UI `ui_element` panel and the existing View pop-out both host the core
+> through one HWND, claiming/releasing the shared session so only one wgpu surface ever exists;
+> ownership arbitration (400 ms poll) hands the session to a still-open host when the owner frees,
+> non-owners paint a GDI placeholder; "Next scene" via right-click context menu + Space; and a
+> visibility/playback-driven render cadence (full while playing+visible, ~6-7 fps idle, timer
+> stopped when hidden). Verified in review: plugin-only (diff touches only `foo_lmv.cpp`), C ABI
+> unchanged (`LMV_ABI_VERSION` still 1, only the pre-existing surface called), the single-`lmv_create`
+> invariant is owner-gated on both create paths, and free-exactly-once holds across teardown and
+> shutdown. **Carry-forward:** all four done-whens are runtime checks in a live foobar2000 v2 — the
+> code implements each, behavioral confirmation pending an on-device run.
 
 ## TL;DR
 
