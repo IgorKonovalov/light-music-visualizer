@@ -15,6 +15,7 @@
     clippy::unreachable
 )]
 
+pub mod fragment_field;
 pub mod pulse;
 pub mod spectrum;
 pub mod starfield;
@@ -46,6 +47,10 @@ pub(crate) fn create_all(
     surface_format: wgpu::TextureFormat,
 ) -> Vec<Box<dyn Scene>> {
     vec![
+        Box::new(fragment_field::FragmentFieldScene::new(
+            device,
+            surface_format,
+        )),
         Box::new(spectrum::SpectrumScene::new(device, surface_format)),
         Box::new(pulse::PulseScene::new(device, surface_format)),
         Box::new(starfield::StarfieldScene::new(device, surface_format)),
