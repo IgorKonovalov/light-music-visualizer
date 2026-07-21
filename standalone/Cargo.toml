@@ -27,3 +27,23 @@ windows = { version = "=0.62.2", features = [
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Variant",
 ] }
+
+# macOS loopback capture via ScreenCaptureKit (macOS 13+). The objc2 family
+# is the maintained Apple-framework binding set; mac-only, so zero cost on
+# the Windows build.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.4"
+objc2-foundation = "=0.3.2"
+objc2-screen-capture-kit = { version = "=0.3.2", features = [
+    "SCError",
+    "SCShareableContent",
+    "SCStream",
+    "block2",
+    "dispatch2",
+    "objc2-core-media",
+] }
+objc2-core-media = "=0.3.2"
+objc2-core-audio-types = "=0.3.2"
+objc2-core-foundation = "=0.3.2"
+block2 = "=0.6.2"
+dispatch2 = "=0.3.1"

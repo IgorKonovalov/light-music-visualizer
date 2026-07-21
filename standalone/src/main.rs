@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+mod capture_mac;
 #[cfg(windows)]
 mod capture_win;
 
@@ -33,9 +35,11 @@ struct AppState {
 /// Narrow alias so the non-Windows build (no capture until Phase 9) compiles
 /// the same struct shape.
 mod capture_handle {
+    #[cfg(target_os = "macos")]
+    pub type Handle = crate::capture_mac::CaptureHandle;
     #[cfg(windows)]
     pub type Handle = crate::capture_win::CaptureHandle;
-    #[cfg(not(windows))]
+    #[cfg(not(any(windows, target_os = "macos")))]
     pub type Handle = ();
 }
 
@@ -136,14 +140,38 @@ fn start_capture() -> (
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 fn start_capture() -> (
     Option<capture_handle::Handle>,
     Option<SampleConsumer>,
     AudioFormat,
 ) {
-    // macOS capture lands in Plan 0001 Phase 9; until then the app renders
-    // silence-driven visuals.
+    match capture_mac::start() {
+        Ok((handle, consumer)) => {
+            let format = handle.format();
+            (Some(handle), Some(consumer), format)
+        }
+        Err(err) => {
+            eprintln!("ScreenCaptureKit capture unavailable ({err}); rendering without audio");
+            (
+                None,
+                None,
+                AudioFormat {
+                    sample_rate: 48_000,
+                    channels: 2,
+                },
+            )
+        }
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn start_capture() -> (
+    Option<capture_handle::Handle>,
+    Option<SampleConsumer>,
+    AudioFormat,
+) {
+    // No capture path on this platform; render silence-driven visuals.
     (
         None,
         None,
