@@ -1,0 +1,25 @@
+# cargo-release configuration - ADR-0005, plan 0006.
+#
+# The workspace ships ONE application version: root [workspace.package].version,
+# inherited by lmv-core and standalone (`version.workspace = true`). cargo-release
+# bumps that single string once per plan at the architect close, then tags it.
+#
+# cargo-release is a dev tool (`cargo install cargo-release`), NOT a workspace
+# dependency - it never enters the shipped binary or the cargo-deny audit surface.
+#
+# Usage at close: `cargo release <patch|minor> --no-push` (add `--dry-run` to
+# preview). One bump per plan; the C ABI version (LMV_ABI_VERSION) is a separate
+# axis and is never touched here.
+
+# One shared version and one tag for the whole workspace, not per-crate.
+shared-version = true
+
+# Tags read vX.Y.Z (NFR section 8 release-zip / git tag name).
+tag-name = "v{{version}}"
+
+# Never push: the user pushes, consistent with the project's no-auto-push rule.
+push = false
+
+# Never publish to crates.io: both crates are publish=false and ship as a GitHub
+# release zip, not a crates.io package.
+publish = false
