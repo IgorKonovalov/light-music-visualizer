@@ -20,8 +20,12 @@ jobs:
       - uses: actions/checkout@v4
       # rustup on the runner auto-installs the toolchain pinned in rust-toolchain.toml.
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
       - run: cargo build
-      - run: cargo test
+      # nextest for parallelism + per-test isolation; it does not run doctests,
+      # so cover those separately.
+      - run: cargo nextest run
+      - run: cargo test --doc
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo fmt --all --check
 
