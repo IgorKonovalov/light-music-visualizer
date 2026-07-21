@@ -159,7 +159,7 @@ See `references/templates/diagram-examples.md`.
 
 A review fires **once per plan**, after the last phase lands — in a **fresh session** (the
 `dev` close-ceremony prompt tells the user to start one). You review the whole plan's changes,
-not one phase. This is architectural integrity, not line-by-line style. Run four lenses in order:
+not one phase. This is architectural integrity, not line-by-line style. Run five lenses in order:
 
 ### 1. Alignment with the plan/ADR
 - Did the implementation do the phases in the plan? Any missing or added without note?
@@ -199,7 +199,40 @@ not one phase. This is architectural integrity, not line-by-line style. Run four
   input window — no wall-clock reads, no unseeded randomness. Visual randomness, when wanted, is
   explicitly seeded so a scene is reproducible.
 - **No panics in the hot path.** `unwrap()`/`expect()` on per-frame audio or render paths is a
-  latent crash; flag them.
+  latent crash; flag them. (Plan 0002 arms this as a `#![deny(clippy::unwrap_used, ...)]` pragma on
+  hot-path modules; here you verify the pragma is present on every module that *should* be hot-path,
+  since the guard test only checks the files it already knows about.)
+
+### 5. Design integrity — classic principles
+The rules above are mostly mechanical (Plan 0002's gates catch many). This lens is the part no
+lint enforces: whether the shape of the code still honors the architecture. Flag violations as
+`blocker` (breaks the source-agnostic/plugin split) or `major` (erodes it); most are `major`.
+
+- **Layered architecture / dependency direction.** Dependencies point inward only: shells
+  (`standalone`, `plugin-foobar`) depend on `core`; `core` depends on neither, and on no platform
+  or audio-source crate (this is lens 2's source-agnostic rule seen as a *layering* rule). A
+  `use` in `core/` that reaches a shell, a platform SDK, or a windowing type is a layer inversion.
+- **Plugin architecture / the two seams.** The project has exactly two extension seams: the **C
+  ABI** (frontends plug into `core` across it) and the **`Scene` trait** (scenes plug into the
+  engine; per ADR-0002 it stays thin — the preset engine's vocabulary, not a public plugin API).
+  Catch either seam widening: a `Scene` gaining engine-lifecycle or GPU-backend knowledge, or the
+  C ABI growing beyond create/free/push/render/resize. Both are ADR-worthy, not casual edits.
+- **Law of Demeter / principle of least knowledge.** Modules talk to immediate collaborators, not
+  through them. Flag train-wreck reaches across boundaries (`core.dsp().internals().buffer()[i]`,
+  a shell poking `core`'s private state instead of its API). Each layer knows the *interface* of
+  the next, not its internals.
+- **SOLID, applied to this codebase.**
+  - *SRP* — no god modules; a file doing DSP + rendering + capture is the smell (overlaps lens 2's
+    "files doing five jobs").
+  - *OCP* — adding a scene should not require editing the engine/registry's core logic; adding a
+    capture backend should not touch the DSP. If it does, the abstraction is in the wrong place.
+  - *DIP* — `core` depends on abstractions (a render target, the wgpu seam, a PCM-frame intake),
+    never on a concrete platform capture or window type. A concrete leak here is also a lens-2 hit.
+  - *ISP / LSP* — the `Scene` trait and C ABI stay minimal (no method a scene must stub out); any
+    implementor of a trait is substitutable without special-casing.
+- **New hot-path modules join the guard.** If a phase added a hot-path directory not in Plan
+  0002's `core/tests/hygiene.rs` scan set (e.g. a new `core/src/analysis/`), the guard test silently
+  passes it — require the set be extended, or the pragma is unenforced there.
 
 ### Output of a review
 
