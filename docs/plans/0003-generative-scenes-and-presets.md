@@ -1,6 +1,11 @@
 # 0003 — Generative scenes + data-driven presets
 
 > **Status:** approved
+> **Amended 2026-07-21:** added **Phase 0** (relocate the existing scenes to
+> `core/src/render/scenes/` and bring them under the hot-path panic-pragma guard), folding in the
+> Plan 0002 Mode 4 review gap — scenes were per-frame render code outside the pragma set. All new
+> scenes in this plan already land at `core/src/render/scenes/`, so they inherit the guard's
+> existing recursive `src/render/` scan.
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
 > **Related ADRs:** [ADR-0002](../adrs/0002-layered-preset-architecture.md) — this plan
@@ -39,9 +44,12 @@ single `dev` session.
 
 ## Decision
 
-Build five phases, walking-skeleton first. **Phase 1 ships a visible fragment-field scene**
-driven by the *existing* analysis, so the riskiest-to-love capability (does it actually look
-good?) is on screen before any preset plumbing. **Phase 2 enriches the DSP** (bands + tempo).
+Build six phases, walking-skeleton first. **Phase 0** is a hardening commit: relocate the
+existing scenes under `render/` and bring them under the panic-pragma guard (closing a Plan 0002
+review gap) — no new visuals, so the walking skeleton proper is still Phase 1. **Phase 1 ships a
+visible fragment-field scene** driven by the *existing* analysis, so the riskiest-to-love
+capability (does it actually look good?) is on screen before any preset plumbing. **Phase 2
+enriches the DSP** (bands + tempo).
 **Phase 3 adds the CPU particle swarm.** **Phases 4–5 build the preset layer** — a pure
 expression evaluator, then wiring both built-in systems to TOML presets with hot-reload and a
 handful of shipped example presets.
@@ -103,6 +111,32 @@ flowchart LR
 Each phase is one commit. `dev` runs all phases in one session; the architect reviews the whole
 plan at the end.
 
+### Phase 0 — Relocate scenes under render/ + extend the panic-pragma guard
+
+- **Owner skill:** dev
+- **Area:** core (+ standalone import path)
+- **What:** Move the three existing scene modules from `core/src/scenes/` to
+  `core/src/render/scenes/` (`mod.rs`, `spectrum.rs`, `pulse.rs`, `starfield.rs`), so scenes live
+  inside the render engine they belong to (ADR-0002: the `Scene` trait is the render vocabulary
+  presets drive) and are **auto-covered by the hot-path guard's existing recursive scan of
+  `src/render/`**. This closes the Plan 0002 Mode 4 gap (scenes were per-frame render code outside
+  the pragma set) *structurally* — no `core/tests/hygiene.rs` target-list entry to hand-maintain.
+  Update `core/src/lib.rs` (drop the top-level `pub mod scenes`; expose scenes via `render`),
+  `core/src/render/mod.rs`, the registry in `render/scenes/mod.rs`, and the standalone's scene
+  import path (`lmv_core::scenes::…` → `lmv_core::render::scenes::…`). Add the canonical
+  panic-denial pragma to each scene file, resolving the surfaced `indexing_slicing` (e.g.
+  `SpectrumScene`'s `heights[i / 4][i % 4]`) with a reasoned, provably-in-bounds
+  `#[allow(clippy::indexing_slicing, reason = "…")]` — the same pattern Plan 0002 used in
+  `dsp`/`ffi`. The C ABI is untouched (it exposes `extern "C"` functions, not Rust module paths).
+- **Files touched:** `core/src/render/scenes/{mod,spectrum,pulse,starfield}.rs` (git-moved from
+  `core/src/scenes/`), `core/src/lib.rs`, `core/src/render/mod.rs`, `standalone/src/…` (import path).
+- **Done when:** `cargo build`, `cargo nextest run`, `cargo clippy --all-targets -- -D warnings`,
+  and `cargo fmt --all --check` are all green; `cargo test --test hygiene` passes with the moved
+  scenes now inside the guard's `src/render/` scan (no change to `hygiene.rs` needed); deleting the
+  pragma from any scene file makes the guard fail (revert the probe before committing). Public
+  visual behavior is unchanged — this is a relocation + hardening commit. Phases 1 and 3 add new
+  scenes at `core/src/render/scenes/`, which inherit the pragma requirement automatically.
+
 ### Phase 1 — Fragment-field scene (walking skeleton)
 
 - **Owner skill:** dev
@@ -110,8 +144,9 @@ plan at the end.
 - **What:** A new built-in `Scene` that renders a fullscreen audio-reactive fragment shader
   (Shadertoy-style: domain-warped / iterated field colored by a palette), driven by the
   *existing* `AnalysisFrame` (spectrum + onset + beat) plus the scene's fixed-timestep clock.
-- **Files touched:** `core/src/render/scenes/fragment_field.rs` (new), `core/src/render/scenes/mod.rs`
-  (register in `create_all`), a `.wgsl` shader (inline or alongside).
+- **Files touched:** `core/src/render/scenes/fragment_field.rs` (new — carries the panic-denial
+  pragma per Phase 0), `core/src/render/scenes/mod.rs` (register in `create_all`), a `.wgsl` shader
+  (inline or alongside).
 - **Done when:** `cargo run -p standalone` cycles into the fragment scene and it visibly flows
   and reacts to system audio (spectrum drives color/motion, `beat` produces a discrete kick) at
   a stable frame rate. No preset engine involved. Uses the scene fixed-timestep clock, not
@@ -145,7 +180,8 @@ plan at the end.
   sprites (the starfield's rendering approach, scaled up and generalized). Motion is a simple
   swarm/flow field; `bass/mid/treb` drive force/velocity/color bands, `beat` triggers a burst,
   `bar` phase can modulate the field. Seeded RNG only (determinism §6).
-- **Files touched:** `core/src/render/scenes/swarm.rs` (new), `core/src/render/scenes/mod.rs`.
+- **Files touched:** `core/src/render/scenes/swarm.rs` (new — carries the panic-denial pragma per
+  Phase 0), `core/src/render/scenes/mod.rs`.
 - **Done when:** `cargo run -p standalone` cycles into a ~10k-particle swarm that reacts to the
   bands and beat at a stable frame rate on the primary dev box, **and is validated once on the
   iGPU test PC (NFR §9) to hold the 60 fps @ 1080p floor (NFR §1)**; if it misses, the particle
