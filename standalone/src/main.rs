@@ -8,8 +8,9 @@ use lmv_core::audio::{AudioFormat, SampleConsumer};
 use lmv_core::dsp::Analyzer;
 use lmv_core::render::Renderer;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 /// How often the render loop wakes to keep DSP fed while hidden (NFR 1:
@@ -101,8 +102,9 @@ impl AppState {
         let elapsed = self.fps_window_start.elapsed();
         if elapsed >= Duration::from_secs(1) {
             let fps = self.fps_frames as f32 / elapsed.as_secs_f32();
+            let scene = self.renderer.scene_name();
             self.window
-                .set_title(&format!("light-music-visualizer — {fps:.0} fps"));
+                .set_title(&format!("light-music-visualizer — {scene} — {fps:.0} fps"));
             self.fps_window_start = Instant::now();
             self.fps_frames = 0;
         }
@@ -197,6 +199,22 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => state.redraw(),
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(KeyCode::Space),
+                        state: ElementState::Pressed,
+                        repeat: false,
+                        ..
+                    },
+                ..
+            } => {
+                let scene = state.renderer.cycle_scene();
+                state
+                    .window
+                    .set_title(&format!("light-music-visualizer — {scene}"));
+                state.window.request_redraw();
+            }
             _ => {}
         }
     }

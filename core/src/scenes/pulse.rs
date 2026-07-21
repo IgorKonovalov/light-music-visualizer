@@ -1,22 +1,18 @@
-//! Spectrum-bars scene: 64 log-frequency bars, instanced quads, no vertex
-//! buffers. Bar heights rise instantly and decay smoothly; onsets flash the
-//! background.
+//! Beat-pulse scene: every detected beat spawns an expanding ring; bass
+//! feeds a center glow. Overtly beat-driven — the reactivity showcase.
 
-use super::Scene;
-use crate::dsp::{AnalysisFrame, SPECTRUM_BINS};
+use super::{SCENE_DT, Scene, bass_level};
+use crate::dsp::AnalysisFrame;
 
-/// Per-frame fall of a bar toward the live value (frame-rate coupled; fine
-/// for the fixed-quality MVP).
-const DECAY: f32 = 0.92;
-/// Perceptual lift: amplitudes are compressed with sqrt so quiet content
-/// still shows structure.
-const ONSET_FLASH_GAIN: f32 = 3.0;
+const MAX_RINGS: usize = 8;
+/// Ring expansion speed in NDC units per second.
+const RING_SPEED: f32 = 1.6;
 
 const SHADER: &str = r#"
 struct Params {
-    // 64 bar heights packed into vec4s (uniform array stride rules).
-    heights: array<vec4<f32>, 16>,
-    // x: onset flash 0..1, yzw: padding
+    // x: age (s), y: intensity, zw: unused
+    rings: array<vec4<f32>, 8>,
+    // x: bass, y: aspect, zw: unused
     misc: vec4<f32>,
 }
 
@@ -24,45 +20,42 @@ struct Params {
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
-    @location(0) frac_up: f32,
-    @location(1) frac_across: f32,
-    @location(2) height: f32,
+    @location(0) ndc: vec2<f32>,
 }
 
 @vertex
-fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {
-    var corners = array<vec2<f32>, 6>(
-        vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
-        vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
+fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
+    var pts = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0),
     );
-    let c = corners[vi];
-    let n = 64.0;
-    let gap = 0.18;
-    let h = clamp(params.heights[ii / 4u][ii % 4u], 0.004, 1.0);
-
-    let slot = 2.0 / n;
-    let x0 = -1.0 + (f32(ii) + gap * 0.5) * slot;
-    let w = slot * (1.0 - gap);
-    let y0 = -0.92;
-    let y = y0 + c.y * h * 1.84;
-
     var out: VsOut;
-    out.pos = vec4<f32>(x0 + c.x * w, y, 0.0, 1.0);
-    out.frac_up = c.y;
-    out.frac_across = f32(ii) / n;
-    out.height = h;
+    out.pos = vec4<f32>(pts[vi], 0.0, 1.0);
+    out.ndc = pts[vi];
     return out;
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    // Cool-to-hot sweep across the spectrum, brighter toward the bar tip.
-    let low = vec3<f32>(0.10, 0.55, 0.95);
-    let high = vec3<f32>(0.95, 0.25, 0.55);
-    let base = mix(low, high, in.frac_across);
-    let lift = 0.30 + 0.70 * in.frac_up;
-    let flash = params.misc.x;
-    let color = base * lift * (1.0 + 0.6 * flash) + vec3<f32>(flash * 0.08);
+    var p = in.ndc;
+    p.x = p.x * params.misc.y;
+    let r = length(p);
+
+    var glow = 0.0;
+    for (var i = 0u; i < 8u; i = i + 1u) {
+        let ring = params.rings[i];
+        if (ring.y <= 0.0) { continue; }
+        let radius = ring.x * 1.6;
+        let d = abs(r - radius);
+        glow = glow + ring.y * exp(-d * 30.0) * exp(-ring.x * 1.8);
+    }
+
+    let bass = params.misc.x;
+    let center = exp(-r * 4.0) * bass * 1.2;
+
+    let ring_color = vec3<f32>(0.95, 0.35, 0.55);
+    let core_color = vec3<f32>(0.20, 0.55, 1.00);
+    let bgc = vec3<f32>(0.012, 0.012, 0.028);
+    let color = ring_color * glow + core_color * center + bgc;
     return vec4<f32>(color, 1.0);
 }
 "#;
@@ -70,34 +63,33 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Params {
-    heights: [[f32; 4]; 16],
+    rings: [[f32; 4]; MAX_RINGS],
     misc: [f32; 4],
 }
 
-pub struct SpectrumScene {
+pub struct PulseScene {
     pipeline: wgpu::RenderPipeline,
     uniforms: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
-    smoothed: [f32; SPECTRUM_BINS],
-    flash: f32,
+    /// (age seconds, intensity) per slot; intensity 0 = free.
+    rings: [[f32; 4]; MAX_RINGS],
+    bass_smoothed: f32,
 }
 
-impl SpectrumScene {
+impl PulseScene {
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("spectrum-shader"),
+            label: Some("pulse-shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
-
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("spectrum-params"),
+            label: Some("pulse-params"),
             size: std::mem::size_of::<Params>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-
         let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("spectrum-bind-layout"),
+            label: Some("pulse-bind-layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -110,21 +102,20 @@ impl SpectrumScene {
             }],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("spectrum-bind-group"),
+            label: Some("pulse-bind-group"),
             layout: &bind_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: uniforms.as_entire_binding(),
             }],
         });
-
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("spectrum-pipeline-layout"),
+            label: Some("pulse-pipeline-layout"),
             bind_group_layouts: &[Some(&bind_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("spectrum-pipeline"),
+            label: Some("pulse-pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -153,25 +144,45 @@ impl SpectrumScene {
             pipeline,
             uniforms,
             bind_group,
-            smoothed: [0.0; SPECTRUM_BINS],
-            flash: 0.0,
+            rings: [[0.0; 4]; MAX_RINGS],
+            bass_smoothed: 0.0,
         }
     }
 }
 
-impl Scene for SpectrumScene {
+impl Scene for PulseScene {
     fn name(&self) -> &'static str {
-        "spectrum"
+        "pulse"
     }
 
     fn update(&mut self, frame: &AnalysisFrame) {
-        for (s, &v) in self.smoothed.iter_mut().zip(frame.spectrum.iter()) {
-            let v = v.clamp(0.0, 1.0).sqrt();
-            *s = v.max(*s * DECAY);
+        for ring in self.rings.iter_mut() {
+            if ring[1] > 0.0 {
+                ring[0] += SCENE_DT;
+                // Retire once fully expanded off-screen.
+                if ring[0] * RING_SPEED > 2.5 {
+                    ring[1] = 0.0;
+                }
+            }
         }
-        self.flash = (frame.onset * ONSET_FLASH_GAIN)
-            .clamp(0.0, 1.0)
-            .max(self.flash * DECAY);
+        if frame.beat {
+            // Take the free slot, else recycle the oldest ring.
+            let slot = self
+                .rings
+                .iter()
+                .position(|r| r[1] <= 0.0)
+                .unwrap_or_else(|| {
+                    self.rings
+                        .iter()
+                        .enumerate()
+                        .max_by(|a, b| a.1[0].total_cmp(&b.1[0]))
+                        .map(|(i, _)| i)
+                        .unwrap_or(0)
+                });
+            self.rings[slot] = [0.0, (0.5 + frame.onset * 3.0).clamp(0.5, 1.0), 0.0, 0.0];
+        }
+        let bass = bass_level(frame).sqrt();
+        self.bass_smoothed = bass.max(self.bass_smoothed * 0.90);
     }
 
     fn render(
@@ -179,31 +190,22 @@ impl Scene for SpectrumScene {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
-        _aspect: f32,
+        aspect: f32,
     ) {
-        let mut params = Params {
-            heights: [[0.0; 4]; 16],
-            misc: [self.flash, 0.0, 0.0, 0.0],
+        let params = Params {
+            rings: self.rings,
+            misc: [self.bass_smoothed, aspect, 0.0, 0.0],
         };
-        for (i, &s) in self.smoothed.iter().enumerate() {
-            params.heights[i / 4][i % 4] = s;
-        }
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&params));
 
-        let bg = 0.02 + 0.05 * self.flash as f64;
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("spectrum-pass"),
+            label: Some("pulse-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: bg,
-                        g: bg,
-                        b: bg * 1.6,
-                        a: 1.0,
-                    }),
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -214,6 +216,6 @@ impl Scene for SpectrumScene {
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
-        pass.draw(0..6, 0..SPECTRUM_BINS as u32);
+        pass.draw(0..3, 0..1);
     }
 }

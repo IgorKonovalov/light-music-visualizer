@@ -6,13 +6,14 @@
 pub mod context;
 
 use crate::dsp::AnalysisFrame;
-use crate::scenes::spectrum::SpectrumScene;
+use crate::scenes::Scene;
 pub use context::{RenderContext, RenderError};
 
-/// Owns the GPU context plus the active scene and renders one frame per call.
+/// Owns the GPU context plus the scene roster and renders one frame per call.
 pub struct Renderer {
     ctx: RenderContext,
-    scene: SpectrumScene,
+    scenes: Vec<Box<dyn Scene>>,
+    active: usize,
 }
 
 impl Renderer {
@@ -22,18 +23,34 @@ impl Renderer {
         height: u32,
     ) -> Result<Self, RenderError> {
         let ctx = RenderContext::new(target, width, height)?;
-        let scene = SpectrumScene::new(&ctx.device, ctx.surface_format());
-        Ok(Self { ctx, scene })
+        let scenes = crate::scenes::create_all(&ctx.device, ctx.surface_format());
+        Ok(Self {
+            ctx,
+            scenes,
+            active: 0,
+        })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         self.ctx.resize(width, height);
     }
 
+    /// Switch to the next scene; returns its name. Instant — every scene is
+    /// built at startup, so cycling never hitches a live show.
+    pub fn cycle_scene(&mut self) -> &'static str {
+        self.active = (self.active + 1) % self.scenes.len();
+        self.scenes[self.active].name()
+    }
+
+    pub fn scene_name(&self) -> &'static str {
+        self.scenes[self.active].name()
+    }
+
     /// Draw the current scene for this analysis frame. Lost/outdated surfaces
     /// self-heal by reconfiguring; timeouts/occlusion skip the frame; only a
     /// validation failure (a bug) bubbles up.
     pub fn render(&mut self, frame: &AnalysisFrame) -> Result<(), RenderError> {
+        self.scenes[self.active].update(frame);
         let Some(surface_tex) = self.acquire()? else {
             return Ok(()); // transient (timeout/occluded) — skip this frame
         };
@@ -47,8 +64,8 @@ impl Renderer {
                 label: Some("lmv-frame"),
             });
 
-        self.scene
-            .render(&self.ctx.queue, &mut encoder, &view, frame);
+        let aspect = self.ctx.config.width as f32 / self.ctx.config.height.max(1) as f32;
+        self.scenes[self.active].render(&self.ctx.queue, &mut encoder, &view, aspect);
 
         self.ctx.queue.submit(std::iter::once(encoder.finish()));
         self.ctx.queue.present(surface_tex);
