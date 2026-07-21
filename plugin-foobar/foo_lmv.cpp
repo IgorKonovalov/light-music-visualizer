@@ -20,6 +20,7 @@
 #include "SDK/ui_element.h"
 
 #include <windows.h>
+#include <windowsx.h> // GET_X_LPARAM / GET_Y_LPARAM
 
 #include "lmv_core.h"
 
@@ -50,6 +51,8 @@ constexpr UINT kRenderTimerMs = 15;
 // (owning panel removed, pop-out closed) and to keep its placeholder painted.
 constexpr UINT_PTR kArbitrationTimer = 2;
 constexpr UINT kArbitrationMs = 400;
+// Context-menu command id (window-local; not a foobar menu GUID).
+constexpr UINT kMenuNextScene = 1001;
 // Read this far behind "now": visualisation data close to the playback head
 // may not be decoded yet.
 constexpr double kReadBehindSec = 0.05;
@@ -255,6 +258,33 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             break;
+        case WM_LBUTTONDOWN:
+            SetFocus(wnd); // so a subsequent Space reaches this panel/window
+            return 0;
+        case WM_CONTEXTMENU: {
+            // Owner-only: the right-click "Next scene" works without keyboard
+            // focus; a placeholder (non-owner) host offers nothing.
+            if (g_session.owner != wnd || g_session.handle == nullptr) break;
+            POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+            if (pt.x == -1 && pt.y == -1) { // keyboard-invoked: centre on window
+                RECT rc = {};
+                GetWindowRect(wnd, &rc);
+                pt.x = (rc.left + rc.right) / 2;
+                pt.y = (rc.top + rc.bottom) / 2;
+            }
+            HMENU menu = CreatePopupMenu();
+            if (menu == nullptr) return 0;
+            AppendMenuW(menu, MF_STRING, kMenuNextScene, L"Next scene");
+            const int cmd =
+                TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y,
+                               0, wnd, nullptr);
+            DestroyMenu(menu);
+            if (cmd == kMenuNextScene && g_session.owner == wnd &&
+                g_session.handle != nullptr) {
+                lmv_cycle_scene(g_session.handle);
+            }
+            return 0;
+        }
         case WM_PAINT:
             if (g_session.owner != wnd) {
                 PAINTSTRUCT ps = {};
