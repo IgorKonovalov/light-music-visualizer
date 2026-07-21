@@ -9,9 +9,20 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | in-progress | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Phases 0–9 landed (ring, capture, DSP, render, scenes, C ABI, foobar plugin, mac capture code); **Phase 10 (macOS validation on hardware, human) is the only open item**. Passed the Mode 4 review (no blockers; ABI recorded as [ADR-0003](../adrs/0003-c-abi-v1-surface.md)); flip to `done` is held until the Mac run. Bars come from [docs/nfr.md](../nfr.md). |
 | [0002](0002-rust-enforcement-tooling.md) | Rust enforcement tooling | approved | Automatic gates for the best-practice rules: rustfmt + workspace lints → clippy determinism bans → hot-path panic-denial + exact-pin/pragma guard tests → cargo-deny → nextest → Miri. Strict but rational. |
 | [0003](0003-generative-scenes-and-presets.md) | Generative scenes + data-driven presets | draft | Shadertoy-style fragment-field scene + ~10k-particle CPU swarm, driven by TOML+expression presets (ADR-0002 layers 1-2). DSP enriched with bass/mid/treb + deterministic tempo/BPM. Defers Rhai, blending, compute-scale. Drafts roadmap item 1. |
+
+## Recently closed
+
+- [0001 — Core + standalone MVP, then foobar parity](done/0001-core-and-standalone-mvp.md) —
+  **done 2026-07-21**, passed Mode 4 review (no blockers; C ABI recorded in
+  [ADR-0003](../adrs/0003-c-abi-v1-surface.md)). Windows standalone + foobar2000 plugin
+  smoke-tested; 9/9 tests green.
+  **⚠ Carried forward: Phase 10 (macOS validation on real hardware, human) was DEFERRED, not
+  run** — the plan was closed early on the user's request with the Mac path still unverified
+  on-device (it compiles via CI only). When a Mac is available: run the standalone on macOS
+  13+, grant the screen-recording permission, confirm live visuals; report results and route
+  any fixes to `dev` (the `capture_mac` path). This is the one outstanding piece of v1.
 
 **Execution note:** Plan 0001 outran 0002 entirely — all of its code phases (0–9), including
 Phase 6's C ABI `unsafe`, landed before 0002 was built. So 0002 now runs purely as

@@ -1,7 +1,7 @@
 # ADR-0003 — C ABI v1 surface
 
 **Status:** accepted (2026-07-21)
-**Related plan(s):** [0001](../plans/0001-core-and-standalone-mvp.md) (Phase 6)
+**Related plan(s):** [0001](../plans/done/0001-core-and-standalone-mvp.md) (Phase 6)
 
 ## Context
 

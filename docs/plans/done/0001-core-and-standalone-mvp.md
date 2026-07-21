@@ -1,16 +1,23 @@
 # Plan 0001 — Core + standalone MVP, then foobar parity
 
-**Status:** in-progress (2026-07-21 — re-validated against the live-show NFRs and ADR-0002)
-**Related:** [ADR-0001](../adrs/0001-rust-core-wgpu-cabi-foobar-shim.md),
-[ADR-0002](../adrs/0002-layered-preset-architecture.md) (constrains Phase 5),
-[NFRs](../nfr.md)
+**Status:** done (2026-07-21) — Phases 0-9 implemented and passed the Mode 4 review (no
+blockers; the C ABI came out wider than Phase 6 sketched and is now recorded in
+[ADR-0003](../../adrs/0003-c-abi-v1-surface.md)). Verified: 9/9 unit + integration tests
+green; Windows standalone + foobar2000 2.x plugin smoke-tested by the user (spectrum/pulse/
+starfield react, Space cycles). **Phase 10 (macOS validation on real hardware, human) is
+deferred — NOT yet run.** The Mac capture path compiles via CI but is unverified on-device;
+closed on the user's instruction with Phase 10 carried forward (see the phase note below and
+the plans README).
+**Related:** [ADR-0001](../../adrs/0001-rust-core-wgpu-cabi-foobar-shim.md),
+[ADR-0002](../../adrs/0002-layered-preset-architecture.md) (constrains Phase 5),
+[NFRs](../../nfr.md)
 
 ## TL;DR
 
 Stand up the Cargo workspace + CI, get a Windows loopback → DSP → wgpu spectrum scene running
 in the standalone app, add beat/onset reactivity and switchable scenes, then expose the core's
 C ABI and build the foobar2000 plugin against it. macOS capture code lands last, validated by
-the user on real Mac hardware. All quantitative bars come from [docs/nfr.md](../nfr.md).
+the user on real Mac hardware. All quantitative bars come from [docs/nfr.md](../../nfr.md).
 
 ## Context & problem
 
@@ -152,6 +159,10 @@ commit with a concrete "done when". The `**Area:**` note orients the reader
   tests pass; the code is behind `cfg(target_os = "macos")` without disturbing Windows.
 
 ### Phase 10 — macOS validation on hardware
+- **Status:** DEFERRED — not run at plan close (2026-07-21). The plan was closed early on the
+  user's instruction with this phase outstanding; the macOS standalone remains unverified on
+  real hardware. Carried forward in `docs/plans/README.md`; when run, report results and fold
+  any fixes into a follow-up (the mac capture path is `dev`-owned if it needs changes).
 - **Owner skill:** human
 - **Area:** standalone
 - **What:** Run the standalone on the user's Mac (macOS 13+): grant the screen-recording
