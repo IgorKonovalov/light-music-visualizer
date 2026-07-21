@@ -20,15 +20,16 @@ plugin, then extend capture to macOS.
 ## Decision
 
 Phase in dependency order: workspace → capture → DSP → render → scenes → C ABI → plugin →
-mac capture. Each phase is one commit with a concrete "done when". Owners are **areas**
-(`core` / `standalone` / `plugin` / `human`), not skills — this project runs the lightweight
-harness with one implementer. If the project later grows a skill ecosystem, these area tags
-map directly onto skill names.
+mac capture. Each phase is one commit with a concrete "done when". Every phase is owned by
+`dev` (all code lives with the one implementer skill); the `**Area:**` note on each phase says
+which part of the system it touches (`core` / `standalone` / `plugin`) for orientation only —
+it is not the machine-readable owner tag.
 
 ## Implementation phases
 
 ### Phase 0 — Workspace scaffold
-- **Owner area:** core
+- **Owner skill:** dev
+- **Area:** core
 - **What:** Create the Cargo workspace: `core/` (library crate, `crate-type = ["rlib",
   "cdylib", "staticlib"]`), `standalone/` (binary crate depending on `core`), and a
   placeholder `plugin-foobar/` directory (empty for now, real work in Phase 6). Add a Rust
@@ -39,7 +40,8 @@ map directly onto skill names.
   (winit) and exits cleanly.
 
 ### Phase 1 — Audio intake API + Windows loopback capture
-- **Owner area:** standalone
+- **Owner skill:** dev
+- **Area:** standalone + core (intake API)
 - **What:** Define the core's source-agnostic intake: a lock-free SPSC ring buffer and a
   `push_samples(frames, sample_rate, channels)` entry point validated once at the boundary.
   Implement WASAPI loopback capture in `standalone/` that fills the ring on the audio
@@ -49,7 +51,8 @@ map directly onto skill names.
   into the core (verified with a debug meter/level readout); the callback does zero heap work.
 
 ### Phase 2 — DSP: spectrum (FFT) + beat/onset
-- **Owner area:** core
+- **Owner skill:** dev
+- **Area:** core
 - **What:** Windowed FFT producing a normalized spectrum (log-frequency bins), plus an
   onset-envelope + beat estimator. Pure functions of the input window — deterministic, unit
   tested against fixtures. Expose a per-frame `AnalysisFrame { spectrum, onset, beat }`.
@@ -59,7 +62,8 @@ map directly onto skill names.
   on the beats); analysis runs in real time without starving the render loop.
 
 ### Phase 3 — Render engine: wgpu + first spectrum scene
-- **Owner area:** core
+- **Owner skill:** dev
+- **Area:** core + standalone (window wiring)
 - **What:** wgpu device/surface setup, a render-graph seam that takes an `AnalysisFrame` and
   draws, and one spectrum-bars scene. Render loop decoupled from audio via the ring buffer.
 - **Files touched:** `core/src/render/mod.rs`, `core/src/render/context.rs`,
@@ -68,7 +72,8 @@ map directly onto skill names.
   stable frame rate on Windows.
 
 ### Phase 4 — Scene system + beat-reactive scenes + switching
-- **Owner area:** core
+- **Owner skill:** dev
+- **Area:** core + standalone (input)
 - **What:** A `Scene` trait (init/update/render given `AnalysisFrame`), a registry, and 2-3
   scenes total including at least one beat/onset-driven one. Hotkey to cycle scenes in the
   standalone. Any visual randomness is explicitly seeded.
@@ -78,7 +83,8 @@ map directly onto skill names.
   beats/onsets, not just raw spectrum.
 
 ### Phase 5 — C ABI surface
-- **Owner area:** core
+- **Owner skill:** dev
+- **Area:** core (ffi)
 - **What:** Minimal versioned `extern "C"` API: opaque handle create/free, `push_samples`,
   `render_into` (given a native window/surface handle or context), `resize`. A C header
   (generated or hand-written) for the C++ side. Document the contract in the module and note
@@ -89,7 +95,8 @@ map directly onto skill names.
   program links, creates a handle, pushes samples, and frees without leaking.
 
 ### Phase 6 — foobar2000 plugin (Windows)
-- **Owner area:** plugin
+- **Owner skill:** dev
+- **Area:** plugin
 - **What:** C++ shim using the foobar2000 SDK: a visualization component that pulls from
   `visualisation_stream`, forwards samples across the C ABI, and hosts the core's render
   output. Reuses the exact same scenes → parity by construction.
@@ -99,7 +106,8 @@ map directly onto skill names.
   reacting to the currently playing track.
 
 ### Phase 7 — macOS loopback capture *(asterisked)*
-- **Owner area:** standalone
+- **Owner skill:** dev
+- **Area:** standalone
 - **What:** Mac capture path via ScreenCaptureKit (macOS 13+) with a documented BlackHole
   fallback for older systems. Same ring-buffer intake as Windows.
 - **Files touched:** `standalone/src/capture_mac.rs`, platform cfg wiring.

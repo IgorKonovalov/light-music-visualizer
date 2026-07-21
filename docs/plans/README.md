@@ -15,9 +15,12 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 - **Numbering:** sequential, zero-padded 4 digits. Take the next free number above, then
   bump it here in the same session.
-- **Phases:** ordered, each one commit, each tagged `**Owner area:**` (`core` / `standalone`
-  / `plugin` / `human`). Area tags pre-name the skills this project would create if it grows
-  from the lightweight harness into a full skill ecosystem.
+- **Phases:** ordered, each one commit, each tagged `**Owner skill:**` with one value from the
+  vocabulary `dev` (all code) or `human` (a task only the user can do). The `dev` skill reads
+  this tag at the start of each phase; a missing tag is a Mode 4 review blocker. An optional
+  `**Area:**` note (`core` / `standalone` / `plugin`) orients the reader but is not the tag.
+- **Skills:** `architect` designs and owns `docs/`; `dev` implements all code. `architect`
+  writes and closes plans; `dev` flips `draft → in-progress` at "go" and nothing else in the file.
 - **Lifecycle:** `draft` → `in-progress` → `done` (then `git mv` to `done/` and drop from
-  this roster). Review happens at plan end, in a fresh context — not by the session that
-  wrote the code.
+  this roster). Review happens at plan end, in a fresh `/architect` session — not by the
+  session that wrote the code.

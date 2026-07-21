@@ -55,31 +55,46 @@ docs/
     ├── README.md    #   Plans index: roster + next free number. Read this first each session.
     └── done/         #   Completed plans move here
 .claude/
+├── skills/          # architect (designs docs/) + dev (implements all code)
 ├── settings.json    # Registers the block-broad-git-add PreToolUse hook
 └── hooks/           # block-broad-git-add.js — enforces explicit-path staging
 ```
 
 ## How we work (canonical workflow)
 
-This project runs the **lightweight** version of a plan-driven harness. There is no
-multi-skill ecosystem yet — one implementer at a time. The loop:
+This project runs a **two-skill** plan-driven harness (`.claude/skills/`), adapted from the
+market-analyzer repo down to just the split that matters here:
+
+| Skill       | Owns                                             | Triggers on |
+|-------------|--------------------------------------------------|-------------|
+| `architect` | `docs/` — plans, ADRs, diagrams, reviews         | "how should we build X", "design the …", "should we A or B", "plan the …", "review plan N" |
+| `dev`       | all code — `core/`, `standalone/`, `plugin-foobar/` | "implement plan N", "do the DSP phase", "code up the …" |
+
+**The hard split: `architect` designs, `dev` builds — never invert.** The architect never
+writes production code; `dev` never authors plans/ADRs and never reviews its own work. The only
+handoffs are `architect → dev` (the user's "go") and `dev → architect` (the fresh-session
+close-ceremony review). Both are manual on purpose — their value is the clean-context boundary.
+
+The loop:
 
 ```
-interview  ->  ADR (if a real tradeoff)  ->  plan (phased)  ->  implement phase-by-phase  ->  review at plan end
+interview  ->  ADR (if a real tradeoff)  ->  plan (phased)  ->  implement phase-by-phase  ->  fresh-session review at plan end
 ```
 
-- **Interview before writing.** For any non-trivial feature, ask 3-5 tight questions
-  (batch them via `AskUserQuestion`) before designing. A one-minute interview beats a
-  rewrite. Skip only if the user says "just draft it" — then state what you're guessing.
+- **Interview before writing** (architect Mode 1). For any non-trivial feature, ask 3-5
+  tight questions (batch them via `AskUserQuestion`) before designing. A one-minute
+  interview beats a rewrite. Skip only if the user says "just draft it" — then state what
+  you're guessing.
 - **ADR when there's a rejected alternative.** If you can name an option you're *not*
   taking and future-you would want to know why, write an ADR (`docs/adrs/`). If you can't
   name a rejected alternative, you don't need an ADR — just a comment.
 - **Plan before implementing.** Non-trivial work gets a numbered plan in `docs/plans/`
-  with **ordered phases**, each tagged `**Owner area:**` (`core` / `standalone` /
-  `plugin` / `human`). Each phase ships as its own commit with a clear "done when".
-- **Review at plan end**, not per phase. Check the implementation against the plan and
-  the cross-cutting rules below, then flip the plan to `done` and `git mv` it to
-  `plans/done/`. Update `docs/plans/README.md`.
+  with **ordered phases**, each tagged `**Owner skill:**` — vocabulary `dev` (all code) or
+  `human` (a task only the user can do). Each phase ships as its own commit with a clear
+  "done when". `dev` implements the whole plan in one session, no review between phases.
+- **Review at plan end** (architect Mode 4), in a fresh session, not per phase. Check the
+  implementation against the plan and the cross-cutting rules below, then flip the plan to
+  `done`, `git mv` it to `plans/done/`, and refresh `docs/plans/README.md`.
 
 Numbering: sequential, zero-padded 4 digits (`0001`). ADR and plan numbers are independent
 sequences. List existing files and take the next number; the plans README tracks the next
