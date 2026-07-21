@@ -10,6 +10,16 @@
 //! the excess (never blocks); the consumer is expected to drain every render
 //! frame so reads stay near the write head (NFR section 3).
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2). The audio callback and
+// ring must never panic in production; violations fail the build.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 use std::cell::UnsafeCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -139,6 +149,10 @@ impl SampleProducer {
     /// debug builds only to keep the hot path free).
     /// Returns how many samples were written; the rest are dropped if the
     /// ring is full (dropping is the real-time-safe overflow policy).
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "ring indices are masked (& mask) and `samples[..n]` is bounded by n = min(len, free); see the Safety notes"
+    )]
     pub fn push_samples(&mut self, samples: &[f32]) -> usize {
         debug_assert_eq!(samples.len() % self.format.channels as usize, 0);
         let head = self.shared.head.0.load(Ordering::Relaxed);
@@ -179,6 +193,10 @@ impl SampleConsumer {
     }
 
     /// Pop up to `out.len()` interleaved samples; returns how many were read.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "ring indices are masked (& mask) and `out[..n]` is bounded by n = min(len, available); see the Safety notes"
+    )]
     pub fn pop_samples(&mut self, out: &mut [f32]) -> usize {
         let head = self.shared.head.0.load(Ordering::Acquire);
         let tail = self.shared.tail.0.load(Ordering::Relaxed);
@@ -196,6 +214,10 @@ impl SampleConsumer {
 
 #[cfg(test)]
 mod tests {
+    // Tests index fixed-size arrays and known-length buffers freely; the
+    // hot-path pragma above cascades here, so re-allow indexing for tests.
+    #![allow(clippy::indexing_slicing)]
+
     use super::*;
 
     fn fmt(sample_rate: u32, channels: u16) -> AudioFormat {

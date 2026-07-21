@@ -19,6 +19,16 @@
 //! Panics never cross the boundary: every entry point catches unwinds and
 //! maps them to `LMV_ERR_PANIC`.
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2). The FFI seam must not
+// panic; unwinds are caught explicitly and mapped to error codes.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 use std::cell::UnsafeCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -187,6 +197,10 @@ pub unsafe extern "C" fn lmv_attach_window(
 /// # Safety
 /// `handle` valid per `lmv_create`; render-thread role only.
 #[unsafe(no_mangle)]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "n = pop_samples(&mut scratch) <= scratch.len(), so scratch[..n] is in range"
+)]
 pub unsafe extern "C" fn lmv_render(handle: *mut LmvHandle) -> i32 {
     if handle.is_null() {
         return LMV_ERR_INVALID_ARG;

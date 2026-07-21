@@ -1,6 +1,15 @@
 //! Windowed FFT producing linear magnitudes plus a log-frequency band
 //! spectrum for scenes.
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2).
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 use std::sync::Arc;
 
 use rustfft::num_complex::Complex;
@@ -31,6 +40,10 @@ pub struct SpectrumAnalyzer {
 impl SpectrumAnalyzer {
     /// Plan the FFT and precompute the Hann window and band edges for
     /// `sample_rate`.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "band_edges is fixed SPECTRUM_BINS+1 long; k and k-1 stay within it in the fix-up loop"
+    )]
     pub fn new(sample_rate: u32) -> Self {
         let fft = FftPlanner::new().plan_fft_forward(WINDOW_SIZE);
         let scratch_len = fft.get_inplace_scratch_len();
@@ -73,6 +86,10 @@ impl SpectrumAnalyzer {
     /// FFT the window and return the log-frequency band spectrum. Band value
     /// is the peak bin in the band, so a pure tone reads near its amplitude
     /// regardless of band width.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "buf/mags are indexed within their iterators' bounds; band_edges[k]/[k+1] and mags[lo..hi] use precomputed in-range edges"
+    )]
     pub fn analyze(&mut self, window: &[f32; WINDOW_SIZE]) -> [f32; SPECTRUM_BINS] {
         for (i, (s, w)) in window.iter().zip(self.hann.iter()).enumerate() {
             self.buf[i] = Complex::new(s * w, 0.0);
@@ -98,6 +115,10 @@ impl SpectrumAnalyzer {
     }
 
     /// The log-frequency band index that contains `hz`.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "k ranges over 0..SPECTRUM_BINS, a valid index into band_edges"
+    )]
     pub fn band_for_freq(&self, hz: f32) -> usize {
         let bin = (hz / (self.sample_rate / WINDOW_SIZE as f32)).round() as usize;
         let bin = bin.clamp(1, MAG_BINS);

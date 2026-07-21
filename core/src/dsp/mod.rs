@@ -6,6 +6,16 @@
 //! no unseeded randomness (NFR section 6). Window and hop sizes fit the 60 ms
 //! latency budget at 48 kHz: one hop is ~10.7 ms (NFR section 3).
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2). Analysis runs every hop
+// off the render loop; it must never panic on valid input.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 pub mod fft;
 pub mod onset;
 
@@ -92,6 +102,10 @@ impl Analyzer {
 
     /// Feed interleaved samples (whole frames, as produced by the intake).
     /// Runs one analysis pass per completed hop.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "hop_filled < HOP_SIZE (reset at the boundary) and the window slice is a fixed WINDOW_SIZE-HOP_SIZE range; both are in-bounds by construction"
+    )]
     pub fn push_interleaved(&mut self, samples: &[f32]) {
         let channels = self.format.channels as usize;
         for frame in samples.chunks_exact(channels) {

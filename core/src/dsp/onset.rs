@@ -1,6 +1,15 @@
 //! Onset envelope (spectral flux) and beat flagging with an adaptive
 //! threshold. Deterministic: state depends only on the magnitude sequence.
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2).
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 use super::WINDOW_SIZE;
 
 const MAG_BINS: usize = WINDOW_SIZE / 2;
@@ -39,6 +48,10 @@ impl OnsetDetector {
     }
 
     /// One hop: returns (onset envelope value, beat flag).
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "hist_pos < HISTORY (kept modulo HISTORY), a valid index into the ring history"
+    )]
     pub fn process(&mut self, mags: &[f32; MAG_BINS]) -> (f32, bool) {
         // Spectral flux: mean positive magnitude increase per bin.
         let mut flux = 0.0f32;
@@ -69,6 +82,10 @@ impl OnsetDetector {
         (flux, beat)
     }
 
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "hist_len <= HISTORY, so history[..hist_len] is always in range"
+    )]
     fn history_stats(&self) -> (f32, f32) {
         if self.hist_len == 0 {
             return (0.0, 0.0);

@@ -3,6 +3,16 @@
 //! The render loop is driven by the frontend at display cadence and is fully
 //! decoupled from audio delivery — the ring buffer is the seam (CLAUDE.md).
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2). Runs every displayed
+// frame; a panic here is a visible crash mid-show.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 pub mod context;
 
 use crate::dsp::AnalysisFrame;
@@ -68,12 +78,20 @@ impl Renderer {
 
     /// Switch to the next scene; returns its name. Instant — every scene is
     /// built at startup, so cycling never hitches a live show.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "active is kept < scenes.len() (modulo len), a valid index into the non-empty roster"
+    )]
     pub fn cycle_scene(&mut self) -> &'static str {
         self.active = (self.active + 1) % self.scenes.len();
         self.scenes[self.active].name()
     }
 
     /// Name of the currently active scene.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "active is kept < scenes.len(), a valid index into the non-empty roster"
+    )]
     pub fn scene_name(&self) -> &'static str {
         self.scenes[self.active].name()
     }
@@ -81,6 +99,10 @@ impl Renderer {
     /// Draw the current scene for this analysis frame. Lost/outdated surfaces
     /// self-heal by reconfiguring; timeouts/occlusion skip the frame; only a
     /// validation failure (a bug) bubbles up.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "active is kept < scenes.len(), a valid index into the non-empty roster"
+    )]
     pub fn render(&mut self, frame: &AnalysisFrame) -> Result<(), RenderError> {
         self.scenes[self.active].update(frame);
         let Some(surface_tex) = self.acquire()? else {

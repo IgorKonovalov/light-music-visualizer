@@ -1,6 +1,16 @@
 //! wgpu device/surface ownership. All raw GPU access lives behind this layer
 //! (ADR-0001): scene code sees wgpu types, never a backend.
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2). GPU bring-up returns
+// Result; the render path must not panic.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 use wgpu::{CreateSurfaceError, RequestAdapterError, RequestDeviceError, SurfaceTarget};
 
 /// Something went wrong bringing up or drawing with the GPU context.
