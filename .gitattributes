@@ -1,0 +1,59 @@
+# Normalize line endings: store text as LF in the repo, check out native.
+# Keeps Windows and macOS clones from fighting over CRLF/LF churn.
+* text=auto eol=lf
+
+# --- Source ---
+*.rs      text eol=lf diff=rust
+*.toml    text eol=lf
+*.lock    text eol=lf -diff
+*.c       text eol=lf diff=cpp
+*.h       text eol=lf diff=cpp
+*.cpp     text eol=lf diff=cpp
+*.hpp     text eol=lf diff=cpp
+*.cc      text eol=lf diff=cpp
+*.wgsl    text eol=lf
+*.glsl    text eol=lf
+
+# --- Docs / config ---
+*.md      text eol=lf
+*.json    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.txt     text eol=lf
+
+# --- Windows-only scripts must keep CRLF or they break ---
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+
+# --- Binary: never touch line endings, never diff as text ---
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.icns    binary
+*.ttf     binary
+*.otf     binary
+*.woff    binary
+*.woff2   binary
+
+# Audio test fixtures (PCM/WAV/FLAC/etc.) are binary, not diffable.
+*.wav     binary
+*.flac    binary
+*.mp3     binary
+*.ogg     binary
+*.pcm     binary
+*.aiff    binary
+
+# Compiled / GPU artifacts
+*.dll     binary
+*.dylib   binary
+*.so      binary
+*.a       binary
+*.lib     binary
+*.exe     binary
+*.spv     binary
+
+# --- Linguist: don't count docs as project language ---
+docs/**   linguist-documentation
