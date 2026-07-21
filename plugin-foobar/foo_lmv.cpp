@@ -46,6 +46,10 @@ constexpr GUID kGuidLmvElement = {
 constexpr UINT_PTR kRenderTimer = 1;
 // ~66 fps pump; actual pacing is vsync inside the core's present.
 constexpr UINT kRenderTimerMs = 15;
+// A non-owning host polls on this timer to take over once the session frees
+// (owning panel removed, pop-out closed) and to keep its placeholder painted.
+constexpr UINT_PTR kArbitrationTimer = 2;
+constexpr UINT kArbitrationMs = 400;
 // Read this far behind "now": visualisation data close to the playback head
 // may not be decoded yet.
 constexpr double kReadBehindSec = 0.05;
@@ -77,6 +81,10 @@ struct VizSession {
 };
 
 VizSession g_session;
+
+// Tracks the pop-out window independently of session ownership, so the View
+// command can bump an existing pop-out and on_quit can tear it down.
+HWND g_popup_hwnd = nullptr;
 
 void VizSession::destroy_handle() {
     if (handle) {
@@ -183,13 +191,36 @@ void VizSession::release(HWND host) {
     owner = nullptr;
 }
 
+// Paint the "someone else owns the core" placeholder for a non-owning host.
+void paint_placeholder(HWND wnd, HDC hdc) {
+    RECT rc = {};
+    GetClientRect(wnd, &rc);
+    FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+    const wchar_t *msg = L"Light Music Visualizer is active in another window";
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(180, 180, 180));
+    // Word-wrap, then vertically centre the wrapped block within the client.
+    RECT measure = rc;
+    DrawTextW(hdc, msg, -1, &measure, DT_CENTER | DT_WORDBREAK | DT_CALCRECT);
+    RECT draw = rc;
+    const LONG text_h = measure.bottom - measure.top;
+    if (text_h < rc.bottom - rc.top) {
+        draw.top = rc.top + ((rc.bottom - rc.top) - text_h) / 2;
+    }
+    DrawTextW(hdc, msg, -1, &draw, DT_CENTER | DT_WORDBREAK);
+}
+
 // Shared window procedure for both host kinds (pop-out top-level and panel
 // child). The owner check gates every core call so a non-owning host never
-// touches the handle.
+// touches the handle; a non-owner runs an arbitration timer to claim the
+// session once it frees and paints the placeholder meanwhile.
 LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CREATE:
-            g_session.claim(wnd);
+            if (!g_session.claim(wnd)) {
+                // Another host owns the core - wait for it to free the session.
+                SetTimer(wnd, kArbitrationTimer, kArbitrationMs, nullptr);
+            }
             return 0;
         case WM_TIMER:
             if (wp == kRenderTimer) {
@@ -199,11 +230,22 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
                 }
                 return 0;
             }
+            if (wp == kArbitrationTimer) {
+                // Session free? Take it over (claim starts the render timer)
+                // and repaint to clear the placeholder.
+                if (g_session.owner == nullptr && g_session.claim(wnd)) {
+                    KillTimer(wnd, kArbitrationTimer);
+                    InvalidateRect(wnd, nullptr, FALSE);
+                }
+                return 0;
+            }
             break;
         case WM_SIZE:
             if (g_session.owner == wnd && g_session.handle != nullptr &&
                 LOWORD(lp) != 0 && HIWORD(lp) != 0) {
                 lmv_resize(g_session.handle, LOWORD(lp), HIWORD(lp));
+            } else if (g_session.owner != wnd) {
+                InvalidateRect(wnd, nullptr, FALSE); // re-centre the placeholder
             }
             return 0;
         case WM_KEYDOWN:
@@ -213,13 +255,24 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             break;
+        case WM_PAINT:
+            if (g_session.owner != wnd) {
+                PAINTSTRUCT ps = {};
+                HDC hdc = BeginPaint(wnd, &ps);
+                paint_placeholder(wnd, hdc);
+                EndPaint(wnd, &ps);
+                return 0;
+            }
+            break; // owner: the core presents on its timer; DefWindowProc validates
         case WM_ERASEBKGND:
-            return 1; // the core repaints every frame
+            return 1; // owner: core repaints; non-owner: WM_PAINT fills fully
         case WM_CLOSE:
             DestroyWindow(wnd); // pop-out only; panels are destroyed by the host
             return 0;
         case WM_DESTROY:
-            g_session.release(wnd);
+            KillTimer(wnd, kArbitrationTimer); // no-op if this host was the owner
+            g_session.release(wnd); // frees the handle iff this host owned it
+            if (wnd == g_popup_hwnd) g_popup_hwnd = nullptr; // allow reopening
             return 0;
         default:
             break;
@@ -240,8 +293,6 @@ void ensure_window_class() {
 }
 
 // ---- Pop-out window (View menu) ----------------------------------------
-
-HWND g_popup_hwnd = nullptr; // tracks the pop-out independently of ownership
 
 void open_window() {
     if (g_popup_hwnd != nullptr) {
