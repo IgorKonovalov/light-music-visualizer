@@ -9,17 +9,18 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | in-progress | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Phases 0–5 landed (ring, capture, DSP, render, scenes); Phase 6 (C ABI) next. Bars come from [docs/nfr.md](../nfr.md). |
+| [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | in-progress | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Phases 0–9 landed (ring, capture, DSP, render, scenes, C ABI, foobar plugin, mac capture code); **Phase 10 (macOS validation on hardware, human) is the only open item**. Passed the Mode 4 review (no blockers; ABI recorded as [ADR-0003](../adrs/0003-c-abi-v1-surface.md)); flip to `done` is held until the Mac run. Bars come from [docs/nfr.md](../nfr.md). |
 | [0002](0002-rust-enforcement-tooling.md) | Rust enforcement tooling | approved | Automatic gates for the best-practice rules: rustfmt + workspace lints → clippy determinism bans → hot-path panic-denial + exact-pin/pragma guard tests → cargo-deny → nextest → Miri. Strict but rational. |
 | [0003](0003-generative-scenes-and-presets.md) | Generative scenes + data-driven presets | draft | Shadertoy-style fragment-field scene + ~10k-particle CPU swarm, driven by TOML+expression presets (ADR-0002 layers 1-2). DSP enriched with bass/mid/treb + deterministic tempo/BPM. Defers Rhai, blending, compute-scale. Drafts roadmap item 1. |
 
-**Execution note:** Plan 0001 has advanced faster than 0002 was drafted — Phases 2–5 (the
-lock-free ring, WASAPI capture, DSP, render, scenes) already landed. So 0002 now serves two ends:
-it still wants to run **before 0001's Phase 6 (C ABI)** to arm the gates ahead of the FFI `unsafe`,
-and it **retroactively hardens the already-written hot-path code** — expect its first run to
-require adding the `#![deny(...)]` pragma to the existing `dsp`/`audio`/`render` modules and to
-surface any latent `unwrap`/indexing in the ring and DSP. That retroactive shakedown is a feature,
-not rework.
+**Execution note:** Plan 0001 outran 0002 entirely — all of its code phases (0–9), including
+Phase 6's C ABI `unsafe`, landed before 0002 was built. So 0002 now runs purely as
+**retroactive hardening**: expect its first run to add the `#![deny(...)]` pragma to the
+existing `dsp`/`audio`/`render`/`ffi` modules and to surface any latent `unwrap`/indexing in the
+ring, DSP, and FFI. The Mode 4 review of 0001 confirmed the hot paths are already panic-free by
+construction, so the pragma should land clean — but it also flagged that the **C ABI has no
+automated test coverage** (the C++ shim is not built in CI, and no in-crate FFI test exists);
+adding a minimal `lmv_create`/`push`/`free` test is a natural 0002 gate-work candidate.
 
 ## Roadmap (agreed 2026-07-21, revised same day for the live-show use case; numbers assigned when drafted)
 
@@ -36,8 +37,12 @@ Execution order after Plan 0001, per the NFR interviews ([docs/nfr.md](../nfr.md
 2. **Live performance features** — line-in/audio-interface capture, scene triggers
    (auto-rotate + hotkey/MIDI + experimental track-change detection), fullscreen on a
    chosen display/projector, 4-hour soak stability (NFR §10).
-3. **Adaptive quality** — quality tiers + frame-time governor for the 60 fps iGPU floor
-   (NFR §1). Validated on the older iGPU test PC.
+3. **Adaptive quality + runtime-memory trim** — quality tiers + frame-time governor for the
+   60 fps iGPU floor (NFR §1), plus cutting the standalone's ~200 MB working set (NFR §12).
+   The memory trim's primary lever — compiling wgpu with only the per-OS backend feature
+   (DX12/Metal), dropping the dead Vulkan/GL paths — is a cheap, low-risk win that can
+   front-run the full tier system. Both validated on the older iGPU test PC (footprint stated
+   before/after; the backend trim must not regress the §1 floor).
 4. **Remaining v1 UX** — always-on-top / mini mode, settings persistence (NFR §11;
    fullscreen/multi-monitor land earlier with live features).
 5. **Packaging & release** — GitHub release zip: unsigned standalone exe +
