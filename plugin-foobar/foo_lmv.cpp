@@ -47,6 +47,9 @@ constexpr GUID kGuidLmvElement = {
 constexpr UINT_PTR kRenderTimer = 1;
 // ~66 fps pump; actual pacing is vsync inside the core's present.
 constexpr UINT kRenderTimerMs = 15;
+// Reduced cadence (~6-7 fps) while paused/stopped: keeps scenes alive without
+// pegging the GPU on idle playback.
+constexpr UINT kIdleTimerMs = 150;
 // A non-owning host polls on this timer to take over once the session frees
 // (owning panel removed, pop-out closed) and to keep its placeholder painted.
 constexpr UINT_PTR kArbitrationTimer = 2;
@@ -68,11 +71,17 @@ struct VizSession {
     double cursor = 0.0;
     uint32_t rate = 0;
     uint16_t channels = 0;
+    bool visible = true;   // is the owner host currently shown?
+    UINT timer_ms = 0;     // current render-timer interval (0 = not running)
 
     void destroy_handle();
     void ensure_handle(uint32_t rate, uint16_t channels);
     void push_converted(const audio_sample *data, size_t total, unsigned channels);
     void pump();
+    // Re-arm (or stop) the render timer to match visibility and playback: full
+    // rate while playing and visible, reduced when paused/stopped, off when
+    // hidden. Idempotent - only touches the timer when the cadence changes.
+    void sync_render_timer();
 
     // Take ownership for `host` if the session is free. On success the core
     // handle + stream + render timer are live on `host`; returns false (no
@@ -181,17 +190,48 @@ bool VizSession::claim(HWND host) {
         stream.release();
         return false;
     }
-    SetTimer(host, kRenderTimer, kRenderTimerMs, nullptr);
+    visible = true;
+    timer_ms = 0;
+    sync_render_timer(); // starts the render timer at the right cadence
     return true;
 }
 
 void VizSession::release(HWND host) {
     if (owner != host) return;
     KillTimer(host, kRenderTimer);
+    timer_ms = 0;
+    visible = true;
     destroy_handle();
     stream.release();
     cursor = 0.0;
     owner = nullptr;
+}
+
+// True only while a track is actively playing (not paused, not stopped).
+bool playing_at_full_rate() {
+    playback_control::ptr pc = playback_control::get();
+    return pc->is_playing() && !pc->is_paused();
+}
+
+void VizSession::sync_render_timer() {
+    if (owner == nullptr) return;
+    const UINT target =
+        !visible ? 0 : (playing_at_full_rate() ? kRenderTimerMs : kIdleTimerMs);
+    if (target == timer_ms) return;
+    if (target == 0) {
+        KillTimer(owner, kRenderTimer);
+    } else {
+        SetTimer(owner, kRenderTimer, target, nullptr); // re-arms same id
+    }
+    timer_ms = target;
+}
+
+// Apply a visibility change reported for `host` (Default UI notify, or a
+// pop-out show/hide/minimise). Only the owner's timer is affected.
+void set_host_visibility(HWND host, bool vis) {
+    if (g_session.owner != host || g_session.visible == vis) return;
+    g_session.visible = vis;
+    g_session.sync_render_timer();
 }
 
 // Paint the "someone else owns the core" placeholder for a non-owning host.
@@ -230,6 +270,8 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (g_session.owner == wnd) {
                     g_session.pump();
                     if (g_session.handle != nullptr) lmv_render(g_session.handle);
+                    // Follow play/pause transitions between full and idle rate.
+                    g_session.sync_render_timer();
                 }
                 return 0;
             }
@@ -243,14 +285,24 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             break;
-        case WM_SIZE:
-            if (g_session.owner == wnd && g_session.handle != nullptr &&
-                LOWORD(lp) != 0 && HIWORD(lp) != 0) {
-                lmv_resize(g_session.handle, LOWORD(lp), HIWORD(lp));
-            } else if (g_session.owner != wnd) {
+        case WM_SIZE: {
+            // Zero size or minimise counts as hidden (stops rendering); a real
+            // size means shown and drives the core resize.
+            const bool hidden = (wp == SIZE_MINIMIZED) ||
+                                 (LOWORD(lp) == 0) || (HIWORD(lp) == 0);
+            set_host_visibility(wnd, !hidden);
+            if (g_session.owner == wnd) {
+                if (!hidden && g_session.handle != nullptr) {
+                    lmv_resize(g_session.handle, LOWORD(lp), HIWORD(lp));
+                }
+            } else {
                 InvalidateRect(wnd, nullptr, FALSE); // re-centre the placeholder
             }
             return 0;
+        }
+        case WM_SHOWWINDOW:
+            set_host_visibility(wnd, wp != FALSE);
+            break;
         case WM_KEYDOWN:
             if (wp == VK_SPACE && g_session.owner == wnd &&
                 g_session.handle != nullptr) {
@@ -392,6 +444,15 @@ public:
     GUID get_guid() override { return kGuidLmvElement; }
     GUID get_subclass() override {
         return ui_element_subclass_playback_visualisation;
+    }
+    void notify(const GUID &what, t_size param1, const void *,
+                t_size) override {
+        // Default UI's authoritative show/hide for a layout tab; param1 is the
+        // new-visible bool. Stops/resumes rendering when the panel is a
+        // background tab.
+        if (what == ui_element_notify_visibility_changed) {
+            set_host_visibility(m_wnd, param1 != 0);
+        }
     }
 
 private:
