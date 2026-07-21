@@ -18,6 +18,9 @@
 
 #include "SDK/foobar2000.h"
 #include "SDK/ui_element.h"
+#include "SDK/console.h"
+
+#include <string>
 
 #include <windows.h>
 #include <windowsx.h> // GET_X_LPARAM / GET_Y_LPARAM
@@ -98,6 +101,45 @@ VizSession g_session;
 // command can bump an existing pop-out and on_quit can tear it down.
 HWND g_popup_hwnd = nullptr;
 
+// Set once at component init from the runtime ABI handshake (lmv_abi_version).
+// Preset loading is a v2 feature (ADR-0006), so it is skipped when the linked
+// core is not the version this shim was built against.
+bool g_abi_ok = false;
+
+// Resolve the shared per-user preset directory as UTF-8 bytes for the ABI:
+// %APPDATA%\light-music-visualizer\presets - the exact path the standalone
+// seeds and watches, so both frontends share one library. Empty on failure
+// (the core then keeps its embedded defaults).
+std::string resolve_preset_dir_utf8() {
+    const DWORD need = GetEnvironmentVariableW(L"APPDATA", nullptr, 0);
+    if (need == 0) return {};
+    std::wstring wide(need, L'\0');
+    const DWORD got = GetEnvironmentVariableW(L"APPDATA", wide.data(), need);
+    if (got == 0 || got >= need) return {};
+    wide.resize(got);
+    wide += L"\\light-music-visualizer\\presets";
+    const int len =
+        WideCharToMultiByte(CP_UTF8, 0, wide.c_str(),
+                            static_cast<int>(wide.size()), nullptr, 0, nullptr,
+                            nullptr);
+    if (len <= 0) return {};
+    std::string out(static_cast<size_t>(len), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), static_cast<int>(wide.size()),
+                        out.data(), len, nullptr, nullptr);
+    return out;
+}
+
+// Seed + load the shared preset library into `h` over the C ABI. No-op if the
+// ABI handshake failed or the directory can't be resolved. Runs on the main
+// thread (menu/timer), never the audio callback, so its disk I/O is fine.
+void load_presets_into(LmvHandle *h) {
+    if (!g_abi_ok || h == nullptr) return;
+    const std::string dir = resolve_preset_dir_utf8();
+    if (dir.empty()) return;
+    lmv_load_presets(h, reinterpret_cast<const uint8_t *>(dir.data()),
+                     dir.size());
+}
+
 void VizSession::destroy_handle() {
     if (handle) {
         lmv_free(handle);
@@ -126,6 +168,10 @@ void VizSession::ensure_handle(uint32_t new_rate, uint16_t new_channels) {
     handle = h;
     rate = new_rate;
     channels = new_channels;
+    // Every freshly created handle loads the shared curated + user library so
+    // Next-scene cycles it. Called here (not only on claim) so a mid-playback
+    // format change, which recreates the handle, does not drop the presets.
+    load_presets_into(h);
 }
 
 // Convert audio_sample (double on x64 builds) to the f32 the ABI takes,
@@ -411,6 +457,19 @@ mainmenu_commands_factory_t<mainmenu_commands_lmv> g_mainmenu_factory;
 // via WM_DESTROY, so the handle is freed exactly once.
 class initquit_lmv : public initquit {
 public:
+    // Runtime ABI handshake: the shim links the core's C ABI compiled
+    // separately, so a version mismatch is caught here rather than by calling a
+    // function whose contract has shifted. Preset loading (v2) is gated on it.
+    void on_init() override {
+        const uint32_t core_abi = lmv_abi_version();
+        g_abi_ok = (core_abi == LMV_ABI_VERSION);
+        if (!g_abi_ok) {
+            console::printf("foo_lmv: lmv-core ABI mismatch (core reports %u, "
+                            "shim built for %u); preset loading disabled",
+                            static_cast<unsigned>(core_abi),
+                            static_cast<unsigned>(LMV_ABI_VERSION));
+        }
+    }
     void on_quit() override {
         if (g_popup_hwnd != nullptr) DestroyWindow(g_popup_hwnd);
     }
