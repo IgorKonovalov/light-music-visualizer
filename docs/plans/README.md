@@ -3,14 +3,15 @@
 The one-minute "what's in flight" view. Read this first each session instead of
 re-deriving state from `git log`. Completed plans move to `done/`.
 
-**Next free number: 0004**
+**Next free number: 0005**
 
 ## Active roster
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
 | [0002](0002-rust-enforcement-tooling.md) | Rust enforcement tooling | approved | Automatic gates for the best-practice rules: rustfmt + workspace lints → clippy determinism bans → hot-path panic-denial + exact-pin/pragma guard tests → cargo-deny → nextest → Miri. Strict but rational. |
-| [0003](0003-generative-scenes-and-presets.md) | Generative scenes + data-driven presets | draft | Shadertoy-style fragment-field scene + ~10k-particle CPU swarm, driven by TOML+expression presets (ADR-0002 layers 1-2). DSP enriched with bass/mid/treb + deterministic tempo/BPM. Defers Rhai, blending, compute-scale. Drafts roadmap item 1. |
+| [0003](0003-generative-scenes-and-presets.md) | Generative scenes + data-driven presets | approved | Shadertoy-style fragment-field scene + ~10k-particle CPU swarm, driven by TOML+expression presets (ADR-0002 layers 1-2). DSP enriched with bass/mid/treb + deterministic tempo/BPM. Defers Rhai, blending, compute-scale. Drafts roadmap item 1. |
+| [0004](0004-foobar-ui-element-panel.md) | foo_lmv as an embeddable Default UI panel | approved | Register a Default UI `ui_element` so the visualizer docks as a layout panel, not just a pop-out window. Keeps both entry points sharing one wgpu surface via a single claimable `VizSession`; right-click "Next scene"; throttle + pause-when-hidden. Plugin-only, no ABI change. Relates to roadmap item 4 (UX). |
 
 ## Recently closed
 

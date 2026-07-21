@@ -1,6 +1,6 @@
 # 0003 — Generative scenes + data-driven presets
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
 > **Related ADRs:** [ADR-0002](../adrs/0002-layered-preset-architecture.md) — this plan
