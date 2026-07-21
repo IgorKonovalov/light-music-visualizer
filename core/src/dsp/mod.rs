@@ -16,8 +16,10 @@
     clippy::unreachable
 )]
 
+pub mod bands;
 pub mod fft;
 pub mod onset;
+pub mod tempo;
 
 use crate::audio::{AudioFormat, FormatError};
 
@@ -39,6 +41,16 @@ pub struct AnalysisFrame {
     pub onset: f32,
     /// Whether a beat (onset event) fired this hop.
     pub beat: bool,
+    /// Mean magnitude in the bass band (~20-250 Hz).
+    pub bass: f32,
+    /// Mean magnitude in the mid band (~250-4000 Hz).
+    pub mid: f32,
+    /// Mean magnitude in the treble band (~4-18 kHz).
+    pub treb: f32,
+    /// Tempo estimate in BPM (hop-clock autocorrelation; 0 until warm).
+    pub bpm: f32,
+    /// Beat phase in [0, 1): 0 on each beat, ramping to the next.
+    pub bar: f32,
 }
 
 impl Default for AnalysisFrame {
@@ -47,6 +59,11 @@ impl Default for AnalysisFrame {
             spectrum: [0.0; SPECTRUM_BINS],
             onset: 0.0,
             beat: false,
+            bass: 0.0,
+            mid: 0.0,
+            treb: 0.0,
+            bpm: 0.0,
+            bar: 0.0,
         }
     }
 }
@@ -61,6 +78,8 @@ pub struct Analyzer {
     format: AudioFormat,
     spectrum: fft::SpectrumAnalyzer,
     onset: onset::OnsetDetector,
+    bands: bands::BandSplitter,
+    tempo: tempo::TempoTracker,
     window: [f32; WINDOW_SIZE],
     /// Valid samples in `window`; analysis starts once fully warm.
     window_filled: usize,
@@ -80,6 +99,8 @@ impl Analyzer {
             format,
             spectrum: fft::SpectrumAnalyzer::new(format.sample_rate),
             onset: onset::OnsetDetector::new(),
+            bands: bands::BandSplitter::new(format.sample_rate),
+            tempo: tempo::TempoTracker::new(format.sample_rate),
             window: [0.0; WINDOW_SIZE],
             window_filled: 0,
             hop: [0.0; HOP_SIZE],
@@ -120,10 +141,17 @@ impl Analyzer {
                 if self.window_filled == WINDOW_SIZE {
                     let spectrum = self.spectrum.analyze(&self.window);
                     let (onset, beat) = self.onset.process(self.spectrum.magnitudes());
+                    let (bass, mid, treb) = self.bands.split(self.spectrum.magnitudes());
+                    let (bpm, bar) = self.tempo.process(onset, beat);
                     self.latest = AnalysisFrame {
                         spectrum,
                         onset,
                         beat,
+                        bass,
+                        mid,
+                        treb,
+                        bpm,
+                        bar,
                     };
                     self.pending_beat |= beat;
                 }

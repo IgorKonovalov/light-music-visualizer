@@ -117,6 +117,63 @@ fn click_track_produces_onsets_on_the_beats() {
 }
 
 #[test]
+fn tempo_estimate_locks_onto_a_known_click_train() {
+    let mut analyzer = mono_analyzer();
+    // 120 BPM at 48 kHz: a click every 24000 samples. 12 s is well past the
+    // tempo tracker's ~4 s envelope-history warmup.
+    let period = 24_000usize;
+    let signal = click_track(period, 12 * SR as usize);
+    analyzer.push_interleaved(&signal);
+    let bpm = analyzer.take_frame().bpm;
+
+    // Hop-clock autocorrelation should land the tempo within a few BPM of the
+    // true 120 (a determinism/correctness claim, not "the test runs").
+    assert!(
+        (bpm - 120.0).abs() <= 3.0,
+        "estimated tempo {bpm} should be within 3 BPM of the 120 BPM click train"
+    );
+}
+
+#[test]
+fn band_split_is_frequency_correct() {
+    // A pure low tone lands its energy in bass with ~none in treble...
+    let mut low_an = mono_analyzer();
+    low_an.push_interleaved(&sine(60.0, 0.8, SR as usize));
+    let low = low_an.take_frame();
+    assert!(
+        low.bass > 0.01 && low.bass > low.mid && low.bass > low.treb,
+        "60 Hz energy should dominate the bass band (bass={}, mid={}, treb={})",
+        low.bass,
+        low.mid,
+        low.treb
+    );
+    assert!(
+        low.treb < 0.1 * low.bass,
+        "treble should be near-empty for a 60 Hz tone (treb={}, bass={})",
+        low.treb,
+        low.bass
+    );
+
+    // ...and the mirror holds for a pure high tone.
+    let mut high_an = mono_analyzer();
+    high_an.push_interleaved(&sine(6_000.0, 0.8, SR as usize));
+    let high = high_an.take_frame();
+    assert!(
+        high.treb > 0.0 && high.treb > high.bass && high.treb > high.mid,
+        "6 kHz energy should dominate the treble band (bass={}, mid={}, treb={})",
+        high.bass,
+        high.mid,
+        high.treb
+    );
+    assert!(
+        high.bass < 0.1 * high.treb,
+        "bass should be near-empty for a 6 kHz tone (bass={}, treb={})",
+        high.bass,
+        high.treb
+    );
+}
+
+#[test]
 fn analysis_is_deterministic() {
     let signal = {
         let mut s = sine(440.0, 0.5, 2 * SR as usize);
@@ -127,17 +184,20 @@ fn analysis_is_deterministic() {
         s
     };
 
-    let run = |mut analyzer: Analyzer| -> Vec<(Vec<u32>, u32, bool)> {
+    let run = |mut analyzer: Analyzer| -> Vec<(Vec<u32>, u32, bool, u32, u32)> {
         signal
             .chunks_exact(HOP_SIZE)
             .map(|hop| {
                 analyzer.push_interleaved(hop);
                 let f = analyzer.take_frame();
-                // Bit-exact comparison via raw f32 bits.
+                // Bit-exact comparison via raw f32 bits — covers the enriched
+                // bpm/bar too, so the tempo path is proven deterministic.
                 (
                     f.spectrum.iter().map(|v| v.to_bits()).collect(),
                     f.onset.to_bits(),
                     f.beat,
+                    f.bpm.to_bits(),
+                    f.bar.to_bits(),
                 )
             })
             .collect()

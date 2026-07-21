@@ -3,10 +3,9 @@
 //! first "generative-art"-tier built-in (Plan 0003 Phase 1) and the system the
 //! preset layer will later parameterize (ADR-0002 layers 1-2).
 //!
-//! Phase 1 drives it from the *existing* [`AnalysisFrame`] (spectrum + onset +
-//! beat) via band proxies computed from the spectrum; Phase 2 swaps those
-//! proxies for the analyzer's real `bass`/`mid`/`treb`. The uniform layout is
-//! kept stable across that swap.
+//! It is driven by the analyzer's `bass`/`mid`/`treb` bands (Plan 0003 Phase 2;
+//! Phase 1 used spectrum proxies over the same uniform layout) plus the onset
+//! and beat signals.
 
 // Hot-path panic-denial pragma (Plan 0002 Phase 2, extended to scenes by Plan
 // 0003 Phase 0). Runs every displayed frame.
@@ -28,6 +27,10 @@ const DECAY: f32 = 0.90;
 const ONSET_FLASH_GAIN: f32 = 3.0;
 /// Per-frame decay of the discrete beat "kick".
 const KICK_DECAY: f32 = 0.88;
+/// Lifts the analyzer's raw band means (small, since energy is spread across
+/// many linear bins) into a lively 0..1 visual range. A pure display knob —
+/// Phase 5 presets will expose this per-parameter.
+const BAND_GAIN: f32 = 8.0;
 
 const SHADER: &str = r#"
 struct Params {
@@ -210,12 +213,10 @@ impl FragmentFieldScene {
     }
 }
 
-/// Mean of a spectrum sub-range, perceptually compressed with sqrt so quiet
-/// content still registers. Uses iterators (no indexing) so it stays inside
-/// the panic pragma without an allow.
-fn band_mean(frame: &AnalysisFrame, skip: usize, take: usize) -> f32 {
-    let sum: f32 = frame.spectrum.iter().skip(skip).take(take).sum();
-    (sum / take.max(1) as f32).clamp(0.0, 1.0).sqrt()
+/// Perceptual lift of a raw band mean: gain, clamp, sqrt so quiet content
+/// still registers.
+fn shape(level: f32) -> f32 {
+    (level * BAND_GAIN).clamp(0.0, 1.0).sqrt()
 }
 
 impl Scene for FragmentFieldScene {
@@ -226,12 +227,11 @@ impl Scene for FragmentFieldScene {
     fn update(&mut self, frame: &AnalysisFrame) {
         self.time += SCENE_DT;
 
-        // Band proxies from the existing spectrum (64 log bins): low / mid /
-        // high thirds. Phase 2 replaces these with the analyzer's real bands.
-        let bass = band_mean(frame, 0, 8);
-        let mid = band_mean(frame, 8, 24);
-        let treb = band_mean(frame, 32, 32);
-        let energy = band_mean(frame, 0, 64);
+        // The analyzer's real band energies, perceptually shaped.
+        let bass = shape(frame.bass);
+        let mid = shape(frame.mid);
+        let treb = shape(frame.treb);
+        let energy = shape((frame.bass + frame.mid + frame.treb) / 3.0);
 
         // Attack instantly, decay smoothly — the sibling scenes' envelope feel.
         self.bass = bass.max(self.bass * DECAY);
