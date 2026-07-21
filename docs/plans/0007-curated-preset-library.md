@@ -1,6 +1,6 @@
 # 0007 — Curated preset library: robust loading + seed-on-first-run + C ABI v2
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
 > **Related ADRs:** [ADR-0006](../adrs/0006-c-abi-v2-preset-loading.md) — C ABI v2 preset
