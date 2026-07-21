@@ -4,9 +4,11 @@
 //! [`expr`] compiles and evaluates expression strings; [`schema`] parses a
 //! TOML preset into compiled [`Binding`]s. This module also loads presets in
 //! bulk: [`default_presets`] embeds the shipped examples (so the C-ABI/foobar
-//! path always has visuals without a preset directory), and [`load_dir`] reads
-//! a directory for the standalone's hot-reload path — a malformed file is
-//! reported, never fatal, so the caller keeps the last good set (NFR 10).
+//! path always has visuals without a preset directory), [`seed_dir`] writes the
+//! embedded curated set into a per-user directory on first run (write-if-absent,
+//! so a user's edits survive), and [`load_dir`] reads a directory for the
+//! standalone's hot-reload path — a malformed file is reported, never fatal, so
+//! the caller keeps the last good set (NFR 10).
 
 pub mod expr;
 pub mod schema;
@@ -48,6 +50,30 @@ pub fn default_presets() -> Vec<Preset> {
         .collect()
 }
 
+/// Write each embedded curated preset into `dir`, creating `dir` (and any
+/// missing parents) first, but **never overwriting** a file that already
+/// exists — a user's edits to a seeded preset survive re-seeding. Returns how
+/// many files were newly written. Idempotent: a second call on an
+/// already-seeded directory writes zero.
+///
+/// Because seeding never clobbers, a curated preset changed in a later release
+/// does **not** replace the copy a user already has on disk (a "refresh
+/// curated" affordance is a follow-up, not this function's job). Errors bubble
+/// up as `io::Result` so the caller can degrade to the embedded defaults rather
+/// than crash (NFR 10).
+pub fn seed_dir(dir: &Path) -> std::io::Result<usize> {
+    std::fs::create_dir_all(dir)?;
+    let mut written = 0;
+    for (name, contents) in EMBEDDED {
+        let path = dir.join(name);
+        if !path.exists() {
+            std::fs::write(&path, contents)?;
+            written += 1;
+        }
+    }
+    Ok(written)
+}
+
 /// The outcome of loading a preset directory: the presets that compiled, in
 /// filename order, plus the files that failed (so the caller can surface them).
 pub struct LoadReport {
@@ -84,4 +110,42 @@ pub fn load_dir(dir: &Path) -> LoadReport {
     }
 
     LoadReport { presets, errors }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seed_dir_writes_all_then_nothing() {
+        let dir = std::env::temp_dir().join("lmv_seed_dir_test");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // First seed into an empty dir: every embedded preset is written.
+        let written = seed_dir(&dir).expect("seed into fresh temp dir");
+        assert_eq!(
+            written,
+            EMBEDDED.len(),
+            "first seed writes every embedded preset"
+        );
+        for (name, _) in EMBEDDED {
+            assert!(dir.join(name).exists(), "{name} was seeded");
+        }
+
+        // Second seed: write-if-absent means nothing is written and nothing is
+        // clobbered.
+        let again = seed_dir(&dir).expect("re-seed already-seeded dir");
+        assert_eq!(
+            again, 0,
+            "re-seeding writes zero (idempotent, no overwrite)"
+        );
+
+        // Deleting one seeded file re-seeds only that file.
+        let (victim, _) = EMBEDDED[0];
+        std::fs::remove_file(dir.join(victim)).expect("remove one seeded file");
+        let refill = seed_dir(&dir).expect("re-seed after deletion");
+        assert_eq!(refill, 1, "only the missing file is re-written");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -24,10 +24,9 @@ const HIDDEN_TICK: Duration = Duration::from_millis(100);
 /// resolves at compile time to the single [workspace.package].version (ADR-0005).
 const APP_TITLE: &str = concat!("light-music-visualizer ", env!("CARGO_PKG_VERSION"));
 
-/// Directory the standalone loads presets from and watches for hot-reload,
-/// resolved relative to the working directory (the repo root under `cargo run`).
-/// If it is missing or empty the renderer keeps its embedded default presets.
-const PRESET_DIR: &str = "presets";
+/// Per-user application directory name, used under the OS data root to build
+/// the shared preset directory (the foobar plugin resolves the same path).
+const APP_DIR_NAME: &str = "light-music-visualizer";
 /// How often to re-scan the preset directory for edits.
 const PRESET_POLL: Duration = Duration::from_millis(500);
 
@@ -69,9 +68,12 @@ impl AppState {
                 std::process::exit(1);
             });
 
-        // Load presets from disk over the renderer's embedded defaults, and
-        // record the directory signature so later edits hot-reload.
-        let preset_dir = PathBuf::from(PRESET_DIR);
+        // Resolve the per-user preset directory, seed the curated set into it
+        // on first run (write-if-absent), then load it over the renderer's
+        // embedded defaults and record the signature so later edits hot-reload.
+        // Any failure degrades to the embedded defaults (NFR 10).
+        let preset_dir = resolve_preset_dir();
+        seed_preset_dir(&preset_dir);
         reload_presets(&mut renderer, &preset_dir);
         let preset_sig = dir_signature(&preset_dir);
 
@@ -322,6 +324,64 @@ impl ApplicationHandler for App {
         } else {
             event_loop.set_control_flow(ControlFlow::Wait);
         }
+    }
+}
+
+/// Resolve the shared per-user preset directory, hand-rolled per-OS so we add
+/// no runtime dependency (NFR 4). Windows: `%APPDATA%\light-music-visualizer\
+/// presets`. macOS: `~/Library/Application Support/light-music-visualizer/
+/// presets`. Other: `$XDG_DATA_HOME` (or `~/.local/share`) plus the same
+/// suffix. Returns an empty path if the OS data root can't be resolved, so the
+/// caller keeps the renderer's embedded defaults (degrade, never crash — NFR 10).
+fn resolve_preset_dir() -> PathBuf {
+    match preset_data_root() {
+        Some(root) => root.join(APP_DIR_NAME).join("presets"),
+        None => {
+            eprintln!("could not resolve a per-user data directory; keeping embedded presets");
+            PathBuf::new()
+        }
+    }
+}
+
+#[cfg(windows)]
+fn preset_data_root() -> Option<PathBuf> {
+    std::env::var_os("APPDATA")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+fn preset_data_root() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(|home| {
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+        })
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn preset_data_root() -> Option<PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_DATA_HOME").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(xdg));
+    }
+    std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(|home| PathBuf::from(home).join(".local").join("share"))
+}
+
+/// Seed the embedded curated set into `dir` on first run. An unresolved
+/// (empty) path or a seeding error is logged and otherwise ignored — the
+/// renderer's embedded defaults remain (degrade, never crash — NFR 10).
+fn seed_preset_dir(dir: &Path) {
+    if dir.as_os_str().is_empty() {
+        return;
+    }
+    match lmv_core::preset::seed_dir(dir) {
+        Ok(0) => {}
+        Ok(n) => eprintln!("seeded {n} curated preset(s) into {}", dir.display()),
+        Err(err) => eprintln!("could not seed presets into {}: {err}", dir.display()),
     }
 }
 
