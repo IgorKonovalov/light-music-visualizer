@@ -67,6 +67,7 @@ struct Params {
     misc: [f32; 4],
 }
 
+/// Beat-driven scene: expanding rings on each beat over a bass-fed glow.
 pub struct PulseScene {
     pipeline: wgpu::RenderPipeline,
     uniforms: wgpu::Buffer,
@@ -77,6 +78,7 @@ pub struct PulseScene {
 }
 
 impl PulseScene {
+    /// Build the scene's pipeline and uniform buffers on `device`.
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pulse-shader"),

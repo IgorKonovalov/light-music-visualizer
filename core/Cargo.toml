@@ -12,6 +12,9 @@ name = "lmv_core"
 # rlib for the standalone (native Rust), cdylib/staticlib for the foobar C++ shim (C ABI).
 crate-type = ["rlib", "cdylib", "staticlib"]
 
+[lints]
+workspace = true
+
 [dependencies]
 # FFT for the spectrum path. Pure Rust, ~5 transitive deps (num-* family),
 # no unsafe SIMD requirements — well under the NFR 4 dependency gate.

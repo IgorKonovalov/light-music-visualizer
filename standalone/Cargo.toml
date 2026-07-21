@@ -10,6 +10,9 @@ repository.workspace = true
 name = "lmv"
 path = "src/main.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 lmv-core = { path = "../core" }
 # Windowing (ADR-0001 fixes winit for the standalone shell).

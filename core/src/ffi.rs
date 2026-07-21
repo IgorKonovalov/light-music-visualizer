@@ -29,12 +29,19 @@ use crate::render::Renderer;
 /// Bump on any ABI shape change (with the accompanying ADR).
 pub const LMV_ABI_VERSION: u32 = 1;
 
+/// Call succeeded.
 pub const LMV_OK: i32 = 0;
+/// A null handle or otherwise invalid argument was passed.
 pub const LMV_ERR_INVALID_ARG: i32 = -1;
+/// The stream format was rejected at the boundary.
 pub const LMV_ERR_FORMAT: i32 = -2;
+/// Rendering failed (surface/device error).
 pub const LMV_ERR_RENDER: i32 = -3;
+/// A render call was made before a window was attached.
 pub const LMV_ERR_NO_WINDOW: i32 = -4;
+/// A Rust panic was caught at the boundary and mapped to an error.
 pub const LMV_ERR_PANIC: i32 = -5;
+/// The operation is unsupported on this platform.
 pub const LMV_ERR_UNSUPPORTED: i32 = -6;
 
 /// Same headroom as the standalone capture path (~340 ms @ 48 kHz).
@@ -55,6 +62,7 @@ pub struct LmvHandle {
     render: UnsafeCell<RenderState>,
 }
 
+/// The ABI version this build implements (see [`LMV_ABI_VERSION`]).
 #[unsafe(no_mangle)]
 pub extern "C" fn lmv_abi_version() -> u32 {
     LMV_ABI_VERSION

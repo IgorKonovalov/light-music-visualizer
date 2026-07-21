@@ -17,6 +17,8 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// Build a renderer drawing into `target` (a safe window handle — the
+    /// standalone path).
     pub fn new(
         target: impl Into<wgpu::SurfaceTarget<'static>>,
         width: u32,
@@ -59,6 +61,7 @@ impl Renderer {
         })
     }
 
+    /// Reconfigure the surface for a new window size.
     pub fn resize(&mut self, width: u32, height: u32) {
         self.ctx.resize(width, height);
     }
@@ -70,6 +73,7 @@ impl Renderer {
         self.scenes[self.active].name()
     }
 
+    /// Name of the currently active scene.
     pub fn scene_name(&self) -> &'static str {
         self.scenes[self.active].name()
     }

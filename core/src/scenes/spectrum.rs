@@ -74,6 +74,7 @@ struct Params {
     misc: [f32; 4],
 }
 
+/// Spectrum-bars scene: 64 instanced log-frequency bars with onset flash.
 pub struct SpectrumScene {
     pipeline: wgpu::RenderPipeline,
     uniforms: wgpu::Buffer,
@@ -83,6 +84,7 @@ pub struct SpectrumScene {
 }
 
 impl SpectrumScene {
+    /// Build the scene's pipeline and uniform buffers on `device`.
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("spectrum-shader"),

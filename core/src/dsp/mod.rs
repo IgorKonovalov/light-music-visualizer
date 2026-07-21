@@ -11,7 +11,9 @@ pub mod onset;
 
 use crate::audio::{AudioFormat, FormatError};
 
+/// FFT window length in samples (~43 ms at 48 kHz).
 pub const WINDOW_SIZE: usize = 2048;
+/// Samples between successive analysis hops (~10.7 ms at 48 kHz).
 pub const HOP_SIZE: usize = 512;
 /// Log-frequency bands exposed to scenes.
 pub const SPECTRUM_BINS: usize = 64;
@@ -21,8 +23,11 @@ pub const SPECTRUM_BINS: usize = 64;
 /// envelope; `beat` flags an onset event this hop.
 #[derive(Debug, Clone, Copy)]
 pub struct AnalysisFrame {
+    /// Per-band energy, normalized so a full-scale sine reads near 1.0.
     pub spectrum: [f32; SPECTRUM_BINS],
+    /// Spectral-flux onset envelope for this hop.
     pub onset: f32,
+    /// Whether a beat (onset event) fired this hop.
     pub beat: bool,
 }
 
@@ -58,6 +63,7 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
+    /// Build an analyzer for a validated stream format.
     pub fn new(format: AudioFormat) -> Result<Self, FormatError> {
         let format = format.validate()?;
         Ok(Self {
@@ -73,6 +79,7 @@ impl Analyzer {
         })
     }
 
+    /// The validated format this analyzer was created with.
     pub fn format(&self) -> AudioFormat {
         self.format
     }

@@ -76,6 +76,7 @@ struct Particle {
     base_bright: f32,
 }
 
+/// Seeded particle starfield: energy sets cruise speed, beats kick a burst.
 pub struct StarfieldScene {
     pipeline: wgpu::RenderPipeline,
     instances: wgpu::Buffer,
@@ -89,6 +90,7 @@ pub struct StarfieldScene {
 }
 
 impl StarfieldScene {
+    /// Build the scene's pipeline, buffers, and seeded particle set.
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("starfield-shader"),

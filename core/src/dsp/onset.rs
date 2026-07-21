@@ -15,6 +15,7 @@ const THRESHOLD_K: f32 = 1.5;
 /// registers.
 const ABS_FLOOR: f32 = 1e-6;
 
+/// Spectral-flux onset envelope with an adaptive-threshold beat flag.
 pub struct OnsetDetector {
     prev: [f32; MAG_BINS],
     have_prev: bool,
@@ -25,6 +26,7 @@ pub struct OnsetDetector {
 }
 
 impl OnsetDetector {
+    /// A detector with empty history (no beats until it warms up).
     pub fn new() -> Self {
         Self {
             prev: [0.0; MAG_BINS],

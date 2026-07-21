@@ -3,10 +3,14 @@
 
 use wgpu::{CreateSurfaceError, RequestAdapterError, RequestDeviceError, SurfaceTarget};
 
+/// Something went wrong bringing up or drawing with the GPU context.
 #[derive(Debug)]
 pub enum RenderError {
+    /// Creating the wgpu surface for the window failed.
     CreateSurface(CreateSurfaceError),
+    /// No GPU adapter compatible with the surface was found.
     RequestAdapter(RequestAdapterError),
+    /// Requesting a logical device from the adapter failed.
     RequestDevice(RequestDeviceError),
     /// The surface reported no supported configuration on this adapter.
     UnsupportedSurface,
@@ -102,6 +106,7 @@ impl RenderContext {
         })
     }
 
+    /// Reconfigure the surface for a new size (a zero dimension is ignored).
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return; // minimized; keep the old config until we're visible again
@@ -111,6 +116,7 @@ impl RenderContext {
         self.surface.configure(&self.device, &self.config);
     }
 
+    /// The texture format the surface is configured with.
     pub fn surface_format(&self) -> wgpu::TextureFormat {
         self.config.format
     }

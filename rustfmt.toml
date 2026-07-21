@@ -1,0 +1,6 @@
+# Stable rustfmt options only - no nightly-only keys (imports_granularity,
+# group_imports, ...). Enforced by `cargo fmt --all --check` in CI.
+# newline_style = Unix matches the .gitattributes line-ending normalization.
+edition = "2024"
+newline_style = "Unix"
+max_width = 100

@@ -14,20 +14,28 @@ use std::cell::UnsafeCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// Lowest sample rate the intake accepts (Hz).
 pub const MIN_SAMPLE_RATE: u32 = 8_000;
+/// Highest sample rate the intake accepts (Hz).
 pub const MAX_SAMPLE_RATE: u32 = 384_000;
+/// Most interleaved channels the intake accepts.
 pub const MAX_CHANNELS: u16 = 8;
 
 /// PCM stream format, checked once at the intake boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AudioFormat {
+    /// Frames per second, in `MIN_SAMPLE_RATE..=MAX_SAMPLE_RATE`.
     pub sample_rate: u32,
+    /// Interleaved channel count, in `1..=MAX_CHANNELS`.
     pub channels: u16,
 }
 
+/// Why an [`AudioFormat`] was rejected at the boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatError {
+    /// Sample rate fell outside `MIN_SAMPLE_RATE..=MAX_SAMPLE_RATE`.
     SampleRateOutOfRange(u32),
+    /// Channel count fell outside `1..=MAX_CHANNELS`.
     ChannelsOutOfRange(u16),
 }
 
@@ -50,6 +58,7 @@ impl std::fmt::Display for FormatError {
 impl std::error::Error for FormatError {}
 
 impl AudioFormat {
+    /// Check the rate and channel bounds; the hot path trusts the result.
     pub fn validate(self) -> Result<Self, FormatError> {
         if !(MIN_SAMPLE_RATE..=MAX_SAMPLE_RATE).contains(&self.sample_rate) {
             return Err(FormatError::SampleRateOutOfRange(self.sample_rate));
@@ -120,6 +129,7 @@ pub struct SampleProducer {
 }
 
 impl SampleProducer {
+    /// The validated format this producer was created with.
     pub fn format(&self) -> AudioFormat {
         self.format
     }
@@ -156,6 +166,7 @@ pub struct SampleConsumer {
 }
 
 impl SampleConsumer {
+    /// The validated format this consumer was created with.
     pub fn format(&self) -> AudioFormat {
         self.format
     }

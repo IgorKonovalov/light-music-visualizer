@@ -13,6 +13,7 @@ const MAG_BINS: usize = WINDOW_SIZE / 2;
 const BAND_LO_HZ: f32 = 35.0;
 const BAND_HI_HZ: f32 = 18_000.0;
 
+/// Windowed FFT plus a fixed log-frequency band mapping, reused every hop.
 pub struct SpectrumAnalyzer {
     fft: Arc<dyn Fft<f32>>,
     hann: [f32; WINDOW_SIZE],
@@ -28,6 +29,8 @@ pub struct SpectrumAnalyzer {
 }
 
 impl SpectrumAnalyzer {
+    /// Plan the FFT and precompute the Hann window and band edges for
+    /// `sample_rate`.
     pub fn new(sample_rate: u32) -> Self {
         let fft = FftPlanner::new().plan_fft_forward(WINDOW_SIZE);
         let scratch_len = fft.get_inplace_scratch_len();
@@ -94,6 +97,7 @@ impl SpectrumAnalyzer {
         &self.mags
     }
 
+    /// The log-frequency band index that contains `hz`.
     pub fn band_for_freq(&self, hz: f32) -> usize {
         let bin = (hz / (self.sample_rate / WINDOW_SIZE as f32)).round() as usize;
         let bin = bin.clamp(1, MAG_BINS);
