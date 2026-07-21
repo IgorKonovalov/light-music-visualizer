@@ -7,3 +7,5 @@
 
 pub mod audio;
 pub mod dsp;
+pub mod render;
+pub mod scenes;

@@ -16,3 +16,10 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 # FFT for the spectrum path. Pure Rust, ~5 transitive deps (num-* family),
 # no unsafe SIMD requirements — well under the NFR 4 dependency gate.
 rustfft = "=6.4.1"
+# The GPU abstraction ADR-0001 commits to; its transitive weight is the one
+# accepted fixed cost (NFR 4).
+wgpu = "=30.0.0"
+# Blocks on wgpu's async adapter/device futures at init time. Zero deps.
+pollster = "=1.0.1"
+# Safe [f32] -> [u8] casts for uniform uploads. Zero deps.
+bytemuck = { version = "=1.25.2", features = ["derive"] }
