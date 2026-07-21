@@ -2,6 +2,16 @@
 //! the cruise speed, beats kick a speed burst, treble brightens the stars.
 //! Randomness comes only from the explicitly seeded RNG (NFR 6).
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2, extended to scenes by Plan
+// 0003 Phase 0). Runs every displayed frame.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 use super::{SCENE_DT, Scene, SeededRng, energy_level};
 use crate::dsp::AnalysisFrame;
 
@@ -203,6 +213,10 @@ impl StarfieldScene {
 
     /// New particle heading outward. Initial fill scatters over the whole
     /// field; respawns start near the center.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "dir[0]/dir[1] index a fixed [f32; 2] at constant 0/1, always in-bounds"
+    )]
     fn spawn(rng: &mut SeededRng, scatter: bool) -> Particle {
         let angle = rng.range(0.0, std::f32::consts::TAU);
         let dir = [angle.cos(), angle.sin()];
@@ -226,6 +240,10 @@ impl Scene for StarfieldScene {
         "starfield"
     }
 
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "pos[0..2]/dir[0..2] index fixed [f32; 2] arrays at constant 0/1, always in-bounds"
+    )]
     fn update(&mut self, frame: &AnalysisFrame) {
         if frame.beat {
             self.burst = 1.0;

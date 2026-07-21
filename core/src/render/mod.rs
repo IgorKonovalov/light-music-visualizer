@@ -14,10 +14,11 @@
 )]
 
 pub mod context;
+pub mod scenes;
 
 use crate::dsp::AnalysisFrame;
-use crate::scenes::Scene;
 pub use context::{RenderContext, RenderError};
+use scenes::Scene;
 
 /// Owns the GPU context plus the scene roster and renders one frame per call.
 pub struct Renderer {
@@ -35,7 +36,7 @@ impl Renderer {
         height: u32,
     ) -> Result<Self, RenderError> {
         let ctx = RenderContext::new(target, width, height)?;
-        let scenes = crate::scenes::create_all(&ctx.device, ctx.surface_format());
+        let scenes = scenes::create_all(&ctx.device, ctx.surface_format());
         Ok(Self {
             ctx,
             scenes,
@@ -63,7 +64,7 @@ impl Renderer {
             ),
         };
         let ctx = unsafe { RenderContext::new_unsafe(target, width, height) }?;
-        let scenes = crate::scenes::create_all(&ctx.device, ctx.surface_format());
+        let scenes = scenes::create_all(&ctx.device, ctx.surface_format());
         Ok(Self {
             ctx,
             scenes,

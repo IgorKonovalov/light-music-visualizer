@@ -4,6 +4,17 @@
 //! the future preset engine will drive, not a public extension point — no
 //! plugin registration, no dynamic dispatch beyond what cycling needs.
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2, extended to scenes by Plan
+// 0003 Phase 0). Scene update/render run every displayed frame; a panic here
+// is a visible crash mid-show.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 pub mod pulse;
 pub mod spectrum;
 pub mod starfield;
@@ -70,6 +81,10 @@ impl SeededRng {
 }
 
 /// Mean of the lowest bands — a serviceable bass proxy for scenes.
+#[allow(
+    clippy::indexing_slicing,
+    reason = "n = 8 is a compile-time constant <= SPECTRUM_BINS (64), so the slice is always in-bounds"
+)]
 pub(crate) fn bass_level(frame: &AnalysisFrame) -> f32 {
     let n = 8;
     frame.spectrum[..n].iter().sum::<f32>() / n as f32

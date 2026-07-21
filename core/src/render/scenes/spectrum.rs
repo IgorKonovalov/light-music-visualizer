@@ -2,6 +2,16 @@
 //! buffers. Bar heights rise instantly and decay smoothly; onsets flash the
 //! background.
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2, extended to scenes by Plan
+// 0003 Phase 0). Runs every displayed frame.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 use super::Scene;
 use crate::dsp::{AnalysisFrame, SPECTRUM_BINS};
 
@@ -176,6 +186,10 @@ impl Scene for SpectrumScene {
             .max(self.flash * DECAY);
     }
 
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "i ranges 0..SPECTRUM_BINS (64); i/4 is 0..16 and i%4 is 0..4, both in-bounds for heights: [[f32; 4]; 16]"
+    )]
     fn render(
         &mut self,
         queue: &wgpu::Queue,

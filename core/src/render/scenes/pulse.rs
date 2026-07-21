@@ -1,6 +1,16 @@
 //! Beat-pulse scene: every detected beat spawns an expanding ring; bass
 //! feeds a center glow. Overtly beat-driven — the reactivity showcase.
 
+// Hot-path panic-denial pragma (Plan 0002 Phase 2, extended to scenes by Plan
+// 0003 Phase 0). Runs every displayed frame.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
 use super::{SCENE_DT, Scene, bass_level};
 use crate::dsp::AnalysisFrame;
 
@@ -157,6 +167,10 @@ impl Scene for PulseScene {
         "pulse"
     }
 
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "ring[0]/ring[1] index fixed [f32; 4] slots (0,1 constant); slot is a position()/max_by() result, always < MAX_RINGS"
+    )]
     fn update(&mut self, frame: &AnalysisFrame) {
         for ring in self.rings.iter_mut() {
             if ring[1] > 0.0 {
