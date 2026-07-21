@@ -3,7 +3,7 @@
 The one-minute "what's in flight" view. Read this first each session instead of
 re-deriving state from `git log`. Completed plans move to `done/`.
 
-**Next free number: 0003**
+**Next free number: 0004**
 
 ## Active roster
 
@@ -11,6 +11,7 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 |------|-----------------------------------------|--------|---------|
 | [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | in-progress | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Phases 0–5 landed (ring, capture, DSP, render, scenes); Phase 6 (C ABI) next. Bars come from [docs/nfr.md](../nfr.md). |
 | [0002](0002-rust-enforcement-tooling.md) | Rust enforcement tooling | approved | Automatic gates for the best-practice rules: rustfmt + workspace lints → clippy determinism bans → hot-path panic-denial + exact-pin/pragma guard tests → cargo-deny → nextest → Miri. Strict but rational. |
+| [0003](0003-generative-scenes-and-presets.md) | Generative scenes + data-driven presets | draft | Shadertoy-style fragment-field scene + ~10k-particle CPU swarm, driven by TOML+expression presets (ADR-0002 layers 1-2). DSP enriched with bass/mid/treb + deterministic tempo/BPM. Defers Rhai, blending, compute-scale. Drafts roadmap item 1. |
 
 **Execution note:** Plan 0001 has advanced faster than 0002 was drafted — Phases 2–5 (the
 lock-free ring, WASAPI capture, DSP, render, scenes) already landed. So 0002 now serves two ends:
@@ -29,7 +30,9 @@ Execution order after Plan 0001, per the NFR interviews ([docs/nfr.md](../nfr.md
    driving built-in systems (feedback/warp, boids, walkers/growth, 3D scene), with an
    optional budgeted Rhai script for staged per-track arcs (NFR §10). Replaces "scenes are
    Rust code" — Plan 0001's Scene trait becomes the rendering vocabulary presets drive, so
-   keep it thin.
+   keep it thin. **Started as [Plan 0003](0003-generative-scenes-and-presets.md)** (layers 1-2:
+   fragment-field + swarm systems, data + expression presets); Rhai (layer 3), blending, and
+   compute-scale particles remain follow-ups tracked in 0003.
 2. **Live performance features** — line-in/audio-interface capture, scene triggers
    (auto-rotate + hotkey/MIDI + experimental track-change detection), fullscreen on a
    chosen display/projector, 4-hour soak stability (NFR §10).
