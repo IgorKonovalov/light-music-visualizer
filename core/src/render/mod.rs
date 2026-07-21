@@ -31,6 +31,34 @@ impl Renderer {
         })
     }
 
+    /// Renderer targeting a native Win32 window the host owns — the C ABI
+    /// path (foobar2000 shim).
+    ///
+    /// # Safety
+    /// `hwnd` must be a valid window handle that outlives this renderer.
+    #[cfg(windows)]
+    pub unsafe fn new_from_win32_hwnd(
+        hwnd: std::num::NonZeroIsize,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, RenderError> {
+        let target = wgpu::SurfaceTargetUnsafe::RawHandle {
+            raw_display_handle: Some(wgpu::rwh::RawDisplayHandle::Windows(
+                wgpu::rwh::WindowsDisplayHandle::new(),
+            )),
+            raw_window_handle: wgpu::rwh::RawWindowHandle::Win32(
+                wgpu::rwh::Win32WindowHandle::new(hwnd),
+            ),
+        };
+        let ctx = unsafe { RenderContext::new_unsafe(target, width, height) }?;
+        let scenes = crate::scenes::create_all(&ctx.device, ctx.surface_format());
+        Ok(Self {
+            ctx,
+            scenes,
+            active: 0,
+        })
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         self.ctx.resize(width, height);
     }

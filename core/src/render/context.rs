@@ -51,6 +51,31 @@ impl RenderContext {
         let surface = instance
             .create_surface(target)
             .map_err(RenderError::CreateSurface)?;
+        Self::from_surface(&instance, surface, width, height)
+    }
+
+    /// Context from raw display/window handles — the C ABI path, where the
+    /// host (e.g. the foobar2000 shim) owns the window.
+    ///
+    /// # Safety
+    /// The handles must be valid and the window must outlive this context.
+    pub unsafe fn new_unsafe(
+        target: wgpu::SurfaceTargetUnsafe,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, RenderError> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let surface = unsafe { instance.create_surface_unsafe(target) }
+            .map_err(RenderError::CreateSurface)?;
+        Self::from_surface(&instance, surface, width, height)
+    }
+
+    fn from_surface(
+        instance: &wgpu::Instance,
+        surface: wgpu::Surface<'static>,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, RenderError> {
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             compatible_surface: Some(&surface),
             ..Default::default()
