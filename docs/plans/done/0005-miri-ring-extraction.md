@@ -1,6 +1,15 @@
 # 0005 — Extract the lock-free ring into a wgpu-free crate for Miri
 
-> **Status:** in-progress (2026-07-21)
+> **Status:** done (2026-07-21) — landed in `de0fe24` (Phase 1 extraction) and `6af7865`
+> (Phase 2 Miri CI job); passed Mode 4 review with no blockers and no majors. The SPSC ring
+> now lives in the zero-dep `lmv-ring` crate, re-exported unchanged from `core::audio`, with a
+> fast `cargo +nightly miri test -p lmv-ring` UB gate in CI. Behavior-preserving; build,
+> nextest, both hygiene guards, clippy `-D warnings`, fmt, and cargo-deny all verified green.
+> **Wording correction (from the review):** Phase 1's done-when said "the five ring tests" —
+> only the **four** SPSC unit tests move to `lmv-ring`; `format_validation_rejects_out_of_range`
+> tests `AudioFormat`, which correctly stays in `core::audio`. The "five" was loose wording
+> carried from the 0002 close; the Phase-1 "What" (scoping the move to "their SPSC unit tests")
+> is the accurate count.
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
 > **Related:** [Plan 0002](done/0002-rust-enforcement-tooling.md) — implements its **deferred

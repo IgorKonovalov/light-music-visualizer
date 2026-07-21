@@ -10,9 +10,25 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
 | [0004](0004-foobar-ui-element-panel.md) | foo_lmv as an embeddable Default UI panel | approved | Register a Default UI `ui_element` so the visualizer docks as a layout panel, not just a pop-out window. Keeps both entry points sharing one wgpu surface via a single claimable `VizSession`; right-click "Next scene"; throttle + pause-when-hidden. Plugin-only, no ABI change. Relates to roadmap item 4 (UX). |
-| [0005](0005-miri-ring-extraction.md) | Extract the lock-free ring into a wgpu-free crate for Miri | approved | Implements Plan 0002's deferred Phase 5: pull the SPSC ring out of `core/src/audio.rs` into a zero-dep `lmv-ring` crate, then run `cargo +nightly miri test -p lmv-ring` as a fast CI UB gate (no wgpu graph to compile). Rejected feature-gating wgpu in `lmv-core`. Behavior-preserving. |
 
 ## Recently closed
+
+- [0005 — Extract the lock-free ring into a wgpu-free crate for Miri](done/0005-miri-ring-extraction.md) —
+  **done 2026-07-21**, passed Mode 4 review (no blockers, no majors). Implements Plan 0002's
+  deferred Phase 5. Phase 1 (`de0fe24`) pulled the SPSC ring — `RingShared`, `SampleProducer`,
+  `SampleConsumer`, `spsc()`, and the four SPSC unit tests — out of `core/src/audio.rs` into a
+  new zero-dependency `lmv-ring` crate, re-exported unchanged from `core::audio` (public API and
+  the C ABI intact). The ring types carry a bare `channels: u16` instead of the core-owned
+  `AudioFormat` (which stays at the `intake()` boundary with its validation), driving one
+  documented `capture_win.rs` call-site edit — the plan's own Risks-section fallback.
+  `hygiene.rs` guards extended to cover `lmv-ring` in both the exact-pin and hot-path-pragma
+  checks. Phase 2 (`6af7865`) added the `miri` CI job (`cargo +nightly miri test -p lmv-ring`) —
+  fast because no wgpu graph compiles; the probe (Release→Relaxed → data-race UB) confirmed the
+  gate bites. No ADR (internal refactor; the rejected feature-gate-wgpu alternative is recorded
+  in the plan). **⚠ Carry-forward:** the Miri job's green-in-CI is a runtime check pending the
+  push (needs the `workflow` OAuth scope on the git credential). **Minor (non-blocking):**
+  `spsc()` is now crate-public in a `publish=false` crate — a slightly wider surface than the
+  former module-private constructor; the `channels`-validated-by-caller contract is documented.
 
 - [0003 — Generative scenes + data-driven presets](done/0003-generative-scenes-and-presets.md) —
   **done 2026-07-21**, passed Mode 4 review (no blockers). Phases 0-5 landed (commits
@@ -70,8 +86,11 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 **Open gap (from the 0001/0002 reviews):** the **C ABI has no automated test coverage** — the
 C++ shim is not built in CI, and no in-crate FFI test exists. 0002 armed the pragma and
 supply-chain gates but did not add an FFI test (it was never a 0002 phase). A minimal
-`lmv_create`/`push`/`free` Rust-side test remains an unassigned candidate for a future plan;
-Miri (the deferred 0002 Phase 5) would cover the ring/FFI pointer handling once it runs.
+`lmv_create`/`push`/`free` Rust-side test remains an unassigned candidate for a future plan.
+Miri (the deferred 0002 Phase 5) now runs in CI via [Plan 0005](done/0005-miri-ring-extraction.md),
+but **only against the ring** — the FFI `unsafe` in `core/src/ffi.rs` is renderer/window-coupled,
+stays in `lmv-core`, and is out of the Miri job's scope, so the FFI pointer handling is still
+uncovered (its C side remains the Plan 0001 Phase-6 smoke program's job, per ADR-0003).
 
 ## Roadmap (agreed 2026-07-21, revised same day for the live-show use case; numbers assigned when drafted)
 
