@@ -24,3 +24,13 @@ jobs:
       - run: cargo test
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo fmt --all --check
+
+  # Supply-chain gate (deny.toml): advisories, licenses, bans, sources.
+  # Platform-independent (reads Cargo.lock + the [graph] targets in deny.toml),
+  # so it runs once on the cheapest runner.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@cargo-deny
+      - run: cargo deny check

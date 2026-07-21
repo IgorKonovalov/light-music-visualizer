@@ -1,0 +1,56 @@
+# Supply-chain gate (Plan 0002 Phase 3). Enforced in CI via `cargo deny check`.
+#
+# NOTE: cargo-deny 0.20.x no longer exposes the per-severity advisory levels the
+# plan named (`vulnerability`/`unmaintained`/`yanked` were removed). Security
+# and unsound advisories are always errors now, which satisfies the plan's
+# intent ("vulnerabilities deny"); a specific finding is silenced only via an
+# explicit, reasoned `advisories.ignore` entry. The field names below
+# (`wildcards`, `unknown-registry`) are the current spelling of the plan's
+# `wildcard-dependencies` / registry ban.
+
+[graph]
+# Evaluate only the platforms we actually ship (ADR-0001: Windows + macOS).
+# This prunes crates pulled in solely by other targets - e.g. winit's Linux
+# Wayland backend (sctk-adwaita -> ab_glyph -> ttf-parser) - so the gate
+# reflects our shipped artifacts rather than deps we never build.
+targets = [
+    { triple = "x86_64-pc-windows-msvc" },
+    { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-apple-darwin" },
+]
+
+[advisories]
+# Default database is rustsec/advisory-db. Nothing ignored: a new ignore entry
+# is a deliberate, reasoned exception (id + reason), never a silent pass.
+ignore = []
+
+[licenses]
+# Explicit allowlist of permissive licenses. Extended by dev as real deps
+# introduce new ones; a copyleft or unknown license surfacing is a review
+# moment, not a silent pass.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+]
+
+[bans]
+# A wildcard (`*`) version requirement on a registry crate fails the build...
+wildcards = "deny"
+# ...but the intra-workspace path dep (standalone -> lmv-core, no version) is
+# a legitimate wildcard, not a supply-chain risk.
+allow-wildcard-paths = true
+# Duplicate versions are an audit/size smell but not a hard failure yet.
+multiple-versions = "warn"
+
+[sources]
+# crates.io is the only trusted source; unknown registries or git sources fail.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

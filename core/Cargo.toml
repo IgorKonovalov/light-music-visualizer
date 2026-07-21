@@ -6,6 +6,10 @@ version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+# Not a crates.io package - linked by the standalone (path) and the foobar
+# plugin (C ABI). publish=false also lets cargo-deny accept the intra-workspace
+# path dependency under wildcards=deny.
+publish = false
 
 [lib]
 name = "lmv_core"
