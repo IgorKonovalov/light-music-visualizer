@@ -1,6 +1,6 @@
 # 0006 — Versioning: single source of truth + cargo-release + surfacing
 
-> **Status:** draft
+> **Status:** in-progress
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev, human
 > **Related ADRs:** [0005](../adrs/0005-versioning-and-release-cadence.md)
