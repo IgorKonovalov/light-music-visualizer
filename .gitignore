@@ -10,6 +10,11 @@ plugin-foobar/*.obj
 plugin-foobar/*.lib
 plugin-foobar/*.exp
 
+# foobar2000 SDK: third-party, separately licensed - obtained per Plan 0001
+# Phase 7, never committed.
+plugin-foobar/sdk/
+plugin-foobar/*.7z
+
 # Editor / OS
 .DS_Store
 Thumbs.db
