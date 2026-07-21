@@ -1,0 +1,13 @@
+# Dense - a tight, fast swarm: high spin churns the flow field, particles ride
+# small and bright, treble tints them, and beats give a crisp shove. Reads as a
+# shimmering cloud rather than distinct dots.
+system = "swarm"
+name = "Dense"
+
+[params]
+force      = "1.5 + clamp(mid * 14, 0, 3)"
+spin       = "0.8 + clamp(treb * 8, 0, 1.5)"
+burst      = "beat * 4"
+hue        = "0.6 + time * 0.03 + clamp(treb * 3, 0, 0.6)"
+brightness = "0.7 + clamp(mid * 7, 0, 0.9)"
+size       = "0.8 + beat * 0.3"

@@ -1,0 +1,12 @@
+# Ember - warm and glow-forward: mids build a steady bloom that bass swells,
+# the hue sits low (reds and oranges) drifting slowly, and warping stays gentle.
+# Bright but unhurried.
+system = "fragment_field"
+name = "Ember"
+
+[params]
+warp  = "0.35 + clamp(bass * 8, 0, 1)"
+hue   = "0.05 + time * 0.01"
+zoom  = "1.0 + clamp(mid * 3, 0, 0.3)"
+glow  = "0.8 + clamp((mid + bass) * 9, 0, 1.4)"
+flash = "clamp(onset * 2, 0, 0.7)"

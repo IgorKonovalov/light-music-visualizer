@@ -1,0 +1,12 @@
+# Warp Drive - warp-forward and kinetic: treble tears the field into fast
+# domain-warp, each beat adds a shove, onset snaps the zoom, and the hue races.
+# The loud end of the fragment set.
+system = "fragment_field"
+name = "Warp Drive"
+
+[params]
+warp  = "0.6 + clamp(treb * 18, 0, 2.2) + beat * 0.4"
+hue   = "time * 0.08 + clamp(mid * 6, 0, 1)"
+zoom  = "1.05 + clamp(onset * 2, 0, 0.6)"
+glow  = "0.5 + clamp(treb * 9, 0, 1)"
+flash = "clamp(onset * 5, 0, 1)"

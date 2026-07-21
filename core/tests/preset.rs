@@ -193,11 +193,17 @@ fn bad_presets_are_rejected() {
 #[test]
 fn embedded_default_presets_all_parse() {
     // The C-ABI / foobar path relies on these rendering without a preset dir.
+    // The count equals the curated library size, so a preset that fails to
+    // compile would drop the length below the target and fail here.
     let presets = lmv_core::preset::default_presets();
     assert_eq!(
         presets.len(),
-        4,
-        "all shipped example presets should compile"
+        10,
+        "all shipped curated presets should compile"
+    );
+    assert!(
+        presets.len() >= 8,
+        "the curated library is the ~8-12 hand-tuned set, not the 4 proof-of-concept files"
     );
 }
 

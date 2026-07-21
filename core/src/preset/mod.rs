@@ -21,22 +21,46 @@ pub use schema::{Binding, Preset, PresetError, SystemKind};
 /// The shipped example presets, embedded at compile time. These are the exact
 /// files under `presets/` at the repo root, so the embedded defaults and the
 /// on-disk hot-reload source never drift.
-const EMBEDDED: [(&str, &str); 4] = [
+const EMBEDDED: [(&str, &str); 10] = [
     (
         "fragment_aurora.toml",
         include_str!("../../../presets/fragment_aurora.toml"),
+    ),
+    (
+        "fragment_ember.toml",
+        include_str!("../../../presets/fragment_ember.toml"),
+    ),
+    (
+        "fragment_glacier.toml",
+        include_str!("../../../presets/fragment_glacier.toml"),
     ),
     (
         "fragment_pulse.toml",
         include_str!("../../../presets/fragment_pulse.toml"),
     ),
     (
-        "swarm_flow.toml",
-        include_str!("../../../presets/swarm_flow.toml"),
+        "fragment_warp.toml",
+        include_str!("../../../presets/fragment_warp.toml"),
     ),
     (
         "swarm_burst.toml",
         include_str!("../../../presets/swarm_burst.toml"),
+    ),
+    (
+        "swarm_dense.toml",
+        include_str!("../../../presets/swarm_dense.toml"),
+    ),
+    (
+        "swarm_drift.toml",
+        include_str!("../../../presets/swarm_drift.toml"),
+    ),
+    (
+        "swarm_flow.toml",
+        include_str!("../../../presets/swarm_flow.toml"),
+    ),
+    (
+        "swarm_storm.toml",
+        include_str!("../../../presets/swarm_storm.toml"),
     ),
 ];
 
