@@ -2,7 +2,7 @@
 # Package is named lmv-core because plain "core" collides with the std `core` crate.
 [package]
 name = "lmv-core"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
