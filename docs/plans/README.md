@@ -3,13 +3,19 @@
 The one-minute "what's in flight" view. Read this first each session instead of
 re-deriving state from `git log`. Completed plans move to `done/`.
 
-**Next free number: 0002**
+**Next free number: 0003**
 
 ## Active roster
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | approved | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Bars come from [docs/nfr.md](../nfr.md). |
+| [0001](0001-core-and-standalone-mvp.md) | Core + standalone MVP, then foobar parity | in-progress | Workspace → CI → Win loopback → DSP → wgpu spectrum → scenes → C ABI → foobar SDK (human) → plugin → mac capture → mac validation (human). Phases 0–1 landed; Phase 2 next. Bars come from [docs/nfr.md](../nfr.md). |
+| [0002](0002-rust-enforcement-tooling.md) | Rust enforcement tooling | approved | Automatic gates for the best-practice rules: rustfmt + workspace lints → clippy determinism bans → hot-path panic-denial + exact-pin/pragma guard tests → cargo-deny → nextest → Miri. Strict but rational; lands before 0001 Phase 2's unsafe. |
+
+**Execution note:** Plan 0002 should run **before Plan 0001's Phase 2** — its gates (hot-path
+panic-denial, exact-pin enforcement, Miri) are cheapest to arm before the lock-free ring and the
+first real dependencies land. Several 0002 gates are "armed but quiet" until 0001 creates the
+DSP/audio/render/ffi modules they govern.
 
 ## Roadmap (agreed 2026-07-21, revised same day for the live-show use case; numbers assigned when drafted)
 
