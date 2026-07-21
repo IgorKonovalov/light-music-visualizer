@@ -1,6 +1,6 @@
 # 0003 — Generative scenes + data-driven presets
 
-> **Status:** approved
+> **Status:** in-progress
 > **Amended 2026-07-21:** added **Phase 0** (relocate the existing scenes to
 > `core/src/render/scenes/` and bring them under the hot-path panic-pragma guard), folding in the
 > Plan 0002 Mode 4 review gap — scenes were per-frame render code outside the pragma set. All new
