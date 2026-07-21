@@ -1,9 +1,22 @@
 # 0006 — Versioning: single source of truth + cargo-release + surfacing
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-21
+> **Closed:** 2026-07-21
 > **Owner skill(s):** dev, human
-> **Related ADRs:** [0005](../adrs/0005-versioning-and-release-cadence.md)
+> **Related ADRs:** [0005](../adrs/0005-versioning-and-release-cadence.md) (accepted at this close)
+
+**Close summary (Mode 4, fresh session).** Phases 1-3 (`dev`) landed in commits ef5c4dd,
+1298e2b, 3616dfb; Phase 4 (`human`) confirmed at close — `cargo-release 1.1.3` is installed
+and the dry-run works. Review verdict: **clean, no blockers, no majors.** Verified live: both
+crates resolve to `0.1.0` via workspace inheritance (`cargo metadata`); exactly one literal
+app-version string (root `Cargo.toml`); the standalone title embeds `env!("CARGO_PKG_VERSION")`
+at all three sites; `cargo release minor --no-push` dry-run edits the single workspace version
+`0.1.0 -> 0.2.0` and creates a single `v0.2.0` tag via `shared-version`. The dry-run's
+`Publishing ...` line was investigated and cleared — it is cargo-release's release-set summary
+header, not a publish action; `publish = false` in both `release.toml` and each `Cargo.toml`
+means no publish can occur. First bump run at this close: **minor, `0.1.0 -> 0.2.0`, tag
+`v0.2.0`, no push** (feature-plan cadence per ADR-0005).
 
 ## TL;DR
 

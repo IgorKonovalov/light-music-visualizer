@@ -1,8 +1,8 @@
 # ADR-0005 — App versioning: SemVer 0.x, one workspace-inherited version, cargo-release as the single bump authority run at plan close
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-21
-> **Related plan(s):** 0006-versioning-wiring (accepted at that plan's close)
+> **Related plan(s):** 0006-versioning-wiring (accepted at that plan's close, 2026-07-21)
 
 ## Context
 
