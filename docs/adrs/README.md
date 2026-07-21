@@ -1,0 +1,14 @@
+# Architecture Decision Records
+
+Numbered, append-only records of decisions that have a rejected alternative worth
+remembering. Accepted ADRs are never edited in place — to change a decision, write a new
+ADR that supersedes the old one and update the status here.
+
+Rule of thumb: if you can't name an option you're *not* taking, you don't need an ADR —
+you need a code comment.
+
+**Next free number: 0002**
+
+| ADR  | Title                                                      | Status   |
+|------|------------------------------------------------------------|----------|
+| [0001](0001-rust-core-wgpu-cabi-foobar-shim.md) | Rust core, wgpu rendering, C ABI with a C++ foobar shim | accepted |
