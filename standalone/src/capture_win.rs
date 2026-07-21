@@ -137,6 +137,9 @@ struct Stream {
     audio_client: IAudioClient,
     capture_client: IAudioCaptureClient,
     producer: SampleProducer,
+    // Interleaving width of the captured stream. The ring producer no longer
+    // exposes the format (Plan 0005), so carry the channel count here.
+    channels: usize,
 }
 
 fn capture_thread(stop: &AtomicBool, setup_tx: &mpsc::Sender<SetupResult>) {
@@ -205,6 +208,7 @@ fn setup_stream() -> Result<(Stream, AudioFormat, SampleConsumer), CaptureError>
                 audio_client,
                 capture_client,
                 producer,
+                channels: core_format.channels as usize,
             },
             core_format,
             consumer,
@@ -217,7 +221,7 @@ fn setup_stream() -> Result<(Stream, AudioFormat, SampleConsumer), CaptureError>
 fn run_capture_loop(stream: &mut Stream, stop: &AtomicBool) {
     // Preallocated so silent packets cost no heap work inside the loop.
     let silence = [0.0f32; SILENCE_CHUNK_SAMPLES];
-    let channels = stream.producer.format().channels as usize;
+    let channels = stream.channels;
     let Stream {
         capture_client,
         producer,

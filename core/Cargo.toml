@@ -20,6 +20,9 @@ crate-type = ["rlib", "cdylib", "staticlib"]
 workspace = true
 
 [dependencies]
+# The lock-free SPSC ring, extracted so Miri can check its `unsafe` without our
+# wgpu graph (Plan 0005). Intra-workspace path dep, re-exported by `audio`.
+lmv-ring = { path = "../lmv-ring" }
 # FFT for the spectrum path. Pure Rust, ~5 transitive deps (num-* family),
 # no unsafe SIMD requirements — well under the NFR 4 dependency gate.
 rustfft = "=6.4.1"

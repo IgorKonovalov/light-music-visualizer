@@ -732,12 +732,17 @@ name = "lmv-core"
 version = "0.2.0"
 dependencies = [
  "bytemuck",
+ "lmv-ring",
  "pollster",
  "rustfft",
  "serde",
  "toml",
  "wgpu",
 ]
+
+[[package]]
+name = "lmv-ring"
+version = "0.2.0"
 
 [[package]]
 name = "lock_api"

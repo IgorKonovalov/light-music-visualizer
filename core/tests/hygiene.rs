@@ -8,9 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
-/// The panic-denial header every core hot-path module must carry. Copy it
-/// verbatim to the top of any new file under `src/dsp/`, `src/render/`,
-/// `src/ffi.rs`, `src/audio.rs`, or `src/preset/expr.rs`:
+/// The panic-denial header every hot-path module must carry. Copy it verbatim
+/// to the top of any new file under `core/src/dsp/`, `core/src/render/`,
+/// `core/src/ffi.rs`, `core/src/audio.rs`, `core/src/preset/expr.rs`, or the
+/// `lmv-ring` crate's `src/` (the extracted SPSC ring, Plan 0005):
 ///
 /// ```ignore
 /// #![deny(
@@ -27,6 +28,16 @@ const PRAGMA_SENTINEL: &str = "clippy::indexing_slicing";
 
 fn core_src() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
+}
+
+/// The workspace root — the parent of the `core` crate this test lives in.
+/// Used to reach sibling crates (`lmv-ring`, `standalone`) whose manifests and
+/// hot-path source the guards below also cover.
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("core crate has a workspace-root parent")
+        .to_path_buf()
 }
 
 fn collect_rs_files(path: &Path, out: &mut Vec<PathBuf>) {
@@ -61,6 +72,9 @@ fn hot_path_modules_carry_the_panic_pragma() {
         // an otherwise load-time module, so it is listed directly rather than
         // scanning all of `src/preset/`.
         src.join("preset").join("expr.rs"),
+        // The SPSC ring's `unsafe` now lives in the sibling lmv-ring crate
+        // (Plan 0005); its whole `src/` is hot-path code.
+        workspace_root().join("lmv-ring").join("src"),
     ];
 
     let mut files = Vec::new();
@@ -89,12 +103,11 @@ fn hot_path_modules_carry_the_panic_pragma() {
 
 #[test]
 fn direct_dependencies_are_exact_pinned() {
-    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("core crate has a workspace-root parent");
+    let root = workspace_root();
     let manifests = [
-        workspace_root.join("core").join("Cargo.toml"),
-        workspace_root.join("standalone").join("Cargo.toml"),
+        root.join("core").join("Cargo.toml"),
+        root.join("lmv-ring").join("Cargo.toml"),
+        root.join("standalone").join("Cargo.toml"),
     ];
     for manifest in &manifests {
         check_exact_pins(manifest);

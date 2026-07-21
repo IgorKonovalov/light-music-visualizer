@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "standalone"]
+members = ["core", "lmv-ring", "standalone"]
 
 [workspace.package]
 # Single source of truth for the application version (ADR-0005). Member crates

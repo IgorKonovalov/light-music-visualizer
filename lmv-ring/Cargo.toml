@@ -1,0 +1,18 @@
+# The lock-free SPSC ring, extracted into its own zero-dependency crate so Miri
+# can check the only pure-Rust `unsafe` in the tree without compiling lmv-core's
+# wgpu/naga graph (Plan 0005 / Plan 0002 Phase 5). No wgpu, no audio-source,
+# no platform types - the same layering rules as lmv-core (ADR-0001).
+[package]
+name = "lmv-ring"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+# Not a crates.io package - a path dependency of lmv-core only. publish=false
+# also lets cargo-deny accept the intra-workspace path dep under wildcards=deny.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
