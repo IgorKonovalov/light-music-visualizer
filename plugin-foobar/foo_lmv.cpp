@@ -20,6 +20,7 @@
 #include "SDK/ui_element.h"
 #include "SDK/console.h"
 
+#include <cstdio>
 #include <string>
 
 #include <windows.h>
@@ -57,8 +58,9 @@ constexpr UINT kIdleTimerMs = 150;
 // (owning panel removed, pop-out closed) and to keep its placeholder painted.
 constexpr UINT_PTR kArbitrationTimer = 2;
 constexpr UINT kArbitrationMs = 400;
-// Context-menu command id (window-local; not a foobar menu GUID).
+// Context-menu command ids (window-local; not foobar menu GUIDs).
 constexpr UINT kMenuNextScene = 1001;
+constexpr UINT kMenuToggleOverlay = 1002;
 // Read this far behind "now": visualisation data close to the playback head
 // may not be decoded yet.
 constexpr double kReadBehindSec = 0.05;
@@ -76,11 +78,15 @@ struct VizSession {
     uint16_t channels = 0;
     bool visible = true;   // is the owner host currently shown?
     UINT timer_ms = 0;     // current render-timer interval (0 = not running)
+    ULONGLONG last_log_ms = 0; // last diagnostics-log write (GetTickCount64)
 
     void destroy_handle();
     void ensure_handle(uint32_t rate, uint16_t channels);
     void push_converted(const audio_sample *data, size_t total, unsigned channels);
     void pump();
+    // Append a diagnostics sample (lmv_get_metrics) to the plugin log at ~1 Hz.
+    // Main-thread only (render timer), never the audio path. No-op pre-v3 core.
+    void maybe_log_metrics();
     // Re-arm (or stop) the render timer to match visibility and playback: full
     // rate while playing and visible, reduced when paused/stopped, off when
     // hidden. Idempotent - only touches the timer when the cadence changes.
@@ -102,9 +108,15 @@ VizSession g_session;
 HWND g_popup_hwnd = nullptr;
 
 // Set once at component init from the runtime ABI handshake (lmv_abi_version).
-// Preset loading is a v2 feature (ADR-0006), so it is skipped when the linked
-// core is not the version this shim was built against.
+// Preset loading (v2, ADR-0006) and diagnostics (v3, ADR-0008) are skipped when
+// the linked core is older than the version this shim was built against.
 bool g_abi_ok = false;
+
+// Current debug flags (ADR-0008), seeded from LMV_DEBUG_OVERLAY at init and
+// flipped by the context-menu toggle. Applied to each handle on creation and
+// live via lmv_set_debug, so the plugin - not the core's env read - is the
+// authority once running.
+uint32_t g_debug_flags = LMV_DEBUG_OFF;
 
 // Resolve the shared per-user preset directory as UTF-8 bytes for the ABI:
 // %APPDATA%\light-music-visualizer\presets - the exact path the standalone
@@ -140,6 +152,31 @@ void load_presets_into(LmvHandle *h) {
                      dir.size());
 }
 
+// True when LMV_DEBUG_OVERLAY is set to a truthy value (1/true/on/yes). Seeds
+// the overlay default; the core reads the same var at lmv_create, but the plugin
+// tracks it too so the menu toggle and handle re-creation stay consistent.
+bool env_overlay_on() {
+    wchar_t buf[16] = {};
+    const DWORD got = GetEnvironmentVariableW(L"LMV_DEBUG_OVERLAY", buf, 16);
+    if (got == 0 || got >= 16) return false;
+    return _wcsicmp(buf, L"1") == 0 || _wcsicmp(buf, L"true") == 0 ||
+           _wcsicmp(buf, L"on") == 0 || _wcsicmp(buf, L"yes") == 0;
+}
+
+// %APPDATA%\light-music-visualizer - the app dir the standalone shares. Empty on
+// failure (the plugin log is then skipped). The diagnostics log lives here, next
+// to the shared presets dir.
+std::wstring plugin_app_dir_w() {
+    const DWORD need = GetEnvironmentVariableW(L"APPDATA", nullptr, 0);
+    if (need == 0) return {};
+    std::wstring wide(need, L'\0');
+    const DWORD got = GetEnvironmentVariableW(L"APPDATA", wide.data(), need);
+    if (got == 0 || got >= need) return {};
+    wide.resize(got);
+    wide += L"\\light-music-visualizer";
+    return wide;
+}
+
 void VizSession::destroy_handle() {
     if (handle) {
         lmv_free(handle);
@@ -172,6 +209,50 @@ void VizSession::ensure_handle(uint32_t new_rate, uint16_t new_channels) {
     // Next-scene cycles it. Called here (not only on claim) so a mid-playback
     // format change, which recreates the handle, does not drop the presets.
     load_presets_into(h);
+    // Re-apply the current debug flags so a menu-toggled overlay survives a
+    // handle re-creation (mid-playback format change); the core otherwise
+    // re-seeds from the env at create.
+    if (g_abi_ok) lmv_set_debug(h, g_debug_flags);
+}
+
+// Append a diagnostics sample to %APPDATA%\light-music-visualizer\
+// plugin-diagnostics.log at ~1 Hz. RSS is not logged: it is host-process-owned
+// (ADR-0008) and would mean "all of foobar", not "us".
+void VizSession::maybe_log_metrics() {
+    if (!g_abi_ok || handle == nullptr) return;
+    const ULONGLONG now = GetTickCount64();
+    if (last_log_ms != 0 && now - last_log_ms < 1000) return;
+    last_log_ms = now;
+
+    LmvMetrics m = {};
+    m.struct_size = sizeof(LmvMetrics);
+    if (lmv_get_metrics(handle, &m) != LMV_OK) return;
+
+    const std::wstring dir = plugin_app_dir_w();
+    if (dir.empty()) return;
+    CreateDirectoryW(dir.c_str(), nullptr); // parent (%APPDATA%) already exists
+    const std::wstring path = dir + L"\\plugin-diagnostics.log";
+
+    const bool is_new = GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES;
+    FILE *f = nullptr;
+    if (_wfopen_s(&f, path.c_str(), L"a") != 0 || f == nullptr) return;
+    if (is_new) {
+        fprintf(f, "unix_ms\tfps\tframe_ms_avg\tframe_ms_p99\tframes_total"
+                   "\tframes_dropped\tgpu_bytes\tdraw_calls\n");
+    }
+    FILETIME ft = {};
+    GetSystemTimeAsFileTime(&ft);
+    const ULONGLONG ft100 =
+        (static_cast<ULONGLONG>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+    // FILETIME is 100 ns ticks since 1601; convert to Unix milliseconds.
+    const ULONGLONG unix_ms = (ft100 - 116444736000000000ULL) / 10000ULL;
+    fprintf(f, "%llu\t%.1f\t%.3f\t%.3f\t%llu\t%llu\t%llu\t%u\n",
+            static_cast<unsigned long long>(unix_ms), m.fps, m.frame_ms_avg,
+            m.frame_ms_p99, static_cast<unsigned long long>(m.frames_total),
+            static_cast<unsigned long long>(m.frames_dropped),
+            static_cast<unsigned long long>(m.gpu_bytes),
+            static_cast<unsigned>(m.draw_calls));
+    fclose(f);
 }
 
 // Convert audio_sample (double on x64 builds) to the f32 the ABI takes,
@@ -316,6 +397,7 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (g_session.owner == wnd) {
                     g_session.pump();
                     if (g_session.handle != nullptr) lmv_render(g_session.handle);
+                    g_session.maybe_log_metrics(); // ~1 Hz, gated internally
                     // Follow play/pause transitions between full and idle rate.
                     g_session.sync_render_timer();
                 }
@@ -373,13 +455,23 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             HMENU menu = CreatePopupMenu();
             if (menu == nullptr) return 0;
             AppendMenuW(menu, MF_STRING, kMenuNextScene, L"Next scene");
+            if (g_abi_ok) {
+                const UINT check =
+                    (g_debug_flags & LMV_DEBUG_OVERLAY) ? MF_CHECKED : MF_UNCHECKED;
+                AppendMenuW(menu, MF_STRING | check, kMenuToggleOverlay,
+                            L"Diagnostics overlay");
+            }
             const int cmd =
                 TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y,
                                0, wnd, nullptr);
             DestroyMenu(menu);
-            if (cmd == kMenuNextScene && g_session.owner == wnd &&
-                g_session.handle != nullptr) {
+            if (g_session.owner != wnd || g_session.handle == nullptr) return 0;
+            if (cmd == kMenuNextScene) {
                 lmv_cycle_scene(g_session.handle);
+            } else if (cmd == kMenuToggleOverlay && g_abi_ok) {
+                // Flip the overlay bit and push it live over the ABI.
+                g_debug_flags ^= LMV_DEBUG_OVERLAY;
+                lmv_set_debug(g_session.handle, g_debug_flags);
             }
             return 0;
         }
@@ -462,13 +554,18 @@ public:
     // function whose contract has shifted. Preset loading (v2) is gated on it.
     void on_init() override {
         const uint32_t core_abi = lmv_abi_version();
-        g_abi_ok = (core_abi == LMV_ABI_VERSION);
+        // v3 is forward-compatible: get_metrics is size-guarded and the older
+        // functions are stable, so a newer core is fine - require >= built ABI.
+        g_abi_ok = (core_abi >= LMV_ABI_VERSION);
         if (!g_abi_ok) {
-            console::printf("foo_lmv: lmv-core ABI mismatch (core reports %u, "
-                            "shim built for %u); preset loading disabled",
+            console::printf("foo_lmv: lmv-core ABI too old (core reports %u, "
+                            "shim needs >= %u); preset loading and diagnostics "
+                            "disabled",
                             static_cast<unsigned>(core_abi),
                             static_cast<unsigned>(LMV_ABI_VERSION));
         }
+        // Seed the overlay default from the environment (a boundary read).
+        g_debug_flags = env_overlay_on() ? LMV_DEBUG_OVERLAY : LMV_DEBUG_OFF;
     }
     void on_quit() override {
         if (g_popup_hwnd != nullptr) DestroyWindow(g_popup_hwnd);
