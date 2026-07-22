@@ -101,6 +101,11 @@ reactivity, animation, shape sanity, and beat response (with an advisory
 distinctness report and golden-image regression). It's dev/agent tooling — the
 `image` crate is a dev-dependency only, so the shipped binary is untouched.
 
+The synthetic `--signal` path (e.g. `--signal click:120`) needs no audio file.
+For the `--audio` path, drop a **16-bit PCM WAV** into `assets/test/` — that
+folder is gitignored, so test audio is added manually and never committed (use
+your own or a royalty-free / CC0 clip).
+
 See **[`docs/capturing.md`](docs/capturing.md)** for the runnable commands.
 
 ## Architecture decisions

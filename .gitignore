@@ -15,6 +15,13 @@ plugin-foobar/*.exp
 plugin-foobar/sdk/
 plugin-foobar/*.7z
 
+# Local test audio for the headless-capture `--audio` path (Plan 0013). Drop your
+# own or royalty-free 16-bit PCM WAV here to test locally; audio is never
+# committed (licensed/factory samples must not be redistributed). Only the
+# folder's README is tracked. See assets/test/README.md.
+assets/test/*
+!assets/test/README.md
+
 # Editor / OS
 .DS_Store
 Thumbs.db

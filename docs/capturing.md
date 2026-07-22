@@ -76,6 +76,13 @@ cargo run -p standalone --example shot -- --preset "Burst" \
 16-bit PCM WAV only (a hand-rolled reader — no decoder dependency); other
 encodings are a followup.
 
+> **Test audio is added manually and never committed.** Drop a 16-bit PCM WAV
+> into [`assets/test/`](../assets/test/) — that folder is gitignored (only its
+> README is tracked), so no licensed audio lands in the repo. Use your own or a
+> royalty-free / CC0 clip; factory-library samples are fine to point at on disk
+> but must not be committed. The `--signal` path needs no file, so the whole
+> audio pipeline can be validated without adding anything.
+
 The `--report --json` schema is a nested object of numbers keyed by
 family/preset: per-band `reactivity`, `animation`, `coverage`, the pairwise
 `pixel`/`shape` distinctness matrices, and `near_duplicates`.
