@@ -4,6 +4,11 @@
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev, human
 > **Related ADRs:** [0010](../adrs/0010-accept-gpu-driver-memory-floor.md) (accept the DX12/wgpu driver-stack floor; retarget NFR §12) — this plan resolves its open questions with numbers.
+> **Amended:** 2026-07-22 — Phase 2 recast from "clear-only render pass" to **construct-only**. A
+> feasibility check found `RenderContext` exposes only `new`/`resize`/`surface_format` publicly; its
+> `device`/`queue`/`surface` are `pub(crate)`, so an example compiling as a separate crate cannot encode
+> its own render pass without adding public API to core — which the phase's "no shipped-code change" rule
+> forbids. We measure at the configure boundary instead (a faithful floor; see Phase 2 and its risk note).
 
 ## TL;DR
 
@@ -94,16 +99,26 @@ skeleton — a real, priced reduction, not plumbing.
 - **Owner skill:** dev
 - **Area:** standalone (throwaway example — not shipped)
 - **What:** A minimal, non-shipped measurement binary that stands up **only** the wgpu context — a winit
-  window + `lmv_core::render::RenderContext` + a clear-only render pass — with no scenes, no DSP, no
-  audio, no overlay, and after a short warmup prints its own working set + private commit. This isolates
-  the fixed DX12 driver + wgpu + swapchain floor. Put it in `standalone/examples/floor.rs` so it never
-  links into the release exe; it may inline the ~8-line `GetProcessMemoryInfo` read rather than depend on
-  the bin's `rss` module.
+  window + `lmv_core::render::RenderContext::new` — with no scenes, no DSP, no audio, no overlay. It
+  builds the context (which configures the surface/swapchain), pumps the event loop through a short
+  warmup, then prints its own working set + private commit. This isolates the fixed DX12 driver + wgpu
+  + swapchain floor. **Construct-only, not a clear-only pass:** `RenderContext` exposes only `new`,
+  `resize`, and `surface_format` publicly — its `device`/`queue`/`surface` are `pub(crate)`, and this
+  example compiles as a separate crate, so it cannot encode its own render pass without adding public API
+  to core. The phase's "no shipped-code change" rule forbids growing core's surface for a diagnostic, so
+  we measure at the configure boundary instead. That is a faithful floor because DX12 allocates the
+  swapchain backbuffers at `surface.configure` (called inside `new`), not lazily at first present — the
+  fixed driver heap is realized without drawing a frame. Put it in `standalone/examples/floor.rs` so it
+  never links into the release exe; it may inline the ~8-line `GetProcessMemoryInfo` read rather than
+  depend on the bin's `rss` module.
 - **Files touched:** `standalone/examples/floor.rs` (new); no change to shipped code.
 - **Done when:** `cargo run -p standalone --example floor --release` on the dev box prints a steady-state
   WS/private number; subtracting it from the Phase-1 post-cull standalone gives the fixed-floor-vs-our-
   overhead split, and that split is stated (commit message or a short note appended to the plan) so
-  NFR §12's per-system budget gets a hard denominator.
+  NFR §12's per-system budget gets a hard denominator. If the construct-only number lands implausibly
+  low (well under the Phase-1 standalone minus a plausible pipeline cost — a sign the driver defers
+  allocation until first present), that is a **finding to route back to architect**, not a licence to
+  expose `device`/`queue`; the fix would be scoped separately, not smuggled into this spike.
 
 ### Phase 3 — Validate on the real §9 iGPU hardware
 - **Owner skill:** human
@@ -122,9 +137,11 @@ skeleton — a real, priced reduction, not plumbing.
   be modest. Accepted — the removal is free and directional, and the number itself is the deliverable:
   it tells us how much pipeline count actually moves the needle (ADR-0010 point 3).
 - **The floor spike is one machine, one vendor.** Same portability caveat as ADR-0010's ceiling; Phase 3
-  widens it to a second vendor. A `RenderContext` clear-only window is a faithful floor only if it uses
-  the same adapter/device options the real renderer does — keep the spike's context construction
-  identical to `RenderContext::new` (it reuses it, so this holds by construction).
+  widens it to a second vendor. The construct-only window is a faithful floor only if it uses the same
+  adapter/device options the real renderer does — it calls `RenderContext::new` verbatim, so this holds
+  by construction. The construct-only choice (vs. a clear-only present loop) trades a few MB of possible
+  first-present allocation for keeping core's public surface untouched; see Phase 2 for why that trade is
+  the right one and what signal (an implausibly low number) triggers a re-think.
 - **The example must stay out of the shipped binary.** Cargo `examples/` never link into the `[[bin]]`,
   but confirm the release build's size/features are unchanged (the hygiene exact-pin guard already covers
   any new dep — prefer none; winit + lmv-core are already present).
