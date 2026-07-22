@@ -58,6 +58,7 @@ plugin-foobar/       # C++ shim: foobar2000 SDK integration, links the core's C 
 docs/
 ├── nfr.md           # Quantified v1 non-functional requirements (the numbers behind "lightweight").
 ├── presets.md       # Preset authoring guide + shipped-library reference (systems, params, expressions).
+├── capturing.md     # Headless capture + visual-QA harness: the shot CLI and the core/tests/ checks.
 ├── adrs/            # Architecture Decision Records + rejected alternatives. Append-only.
 └── plans/           # Phased implementation plans (what's in flight); done/ holds completed plans.
 ```
@@ -90,6 +91,17 @@ directory that both the standalone app and the foobar plugin share.
 See **[`docs/presets.md`](docs/presets.md)** for the full authoring guide and
 library reference: every shipped preset, the two systems and their parameters,
 the expression variables/functions, and where the files live on disk.
+
+## Visual QA / headless capture
+
+Scenes can be rendered **with no window** — the core draws into an offscreen
+texture and returns raw RGBA. A `shot` CLI writes PNGs (and a text/JSON metrics
+report), and a differential harness in `core/tests/` hard-tests every preset for
+reactivity, animation, shape sanity, and beat response (with an advisory
+distinctness report and golden-image regression). It's dev/agent tooling — the
+`image` crate is a dev-dependency only, so the shipped binary is untouched.
+
+See **[`docs/capturing.md`](docs/capturing.md)** for the runnable commands.
 
 ## Architecture decisions
 
