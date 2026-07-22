@@ -30,10 +30,16 @@ re-deriving state from `git log`. Completed plans move to `done/`.
   `static_assert(sizeof == 56)` layout guard. Phase 6 landed the NFR §12 levers: wgpu gated to the per-OS
   backend only (DX12/Metal, default-features off, dropping the Vulkan/GL dead weight) and an explicit
   2-frame swapchain latency. `diag/` joined the hot-path panic-pragma guard + `hygiene.rs` scan set.
-  **⚠ Carry-forward (human):** Phase 7 — before/after RSS + fps on the older Windows iGPU box (NFR §9),
-  confirming the footprint drop toward the §12 "well under ~100 MB" target with no §1 perf-floor
-  regression. Plus the live-foobar overlay/log checks (on-device, like Plan 0004) and macOS RSS
-  (`rss.rs`, unvalidated pending a Mac — Plan 0001 carry-forward). **Nits (non-blocking):** (a)
+  **⚠ Phase 7 outcome (human smoke, 2026-07-22, Windows AMD iGPU):** fps unchanged (~165 @ 1080p — no
+  §1 regression) and overlay/title parity verified, **but the §12 footprint win failed** — release
+  `lmv.exe` measured ~300 MB WS / 343 MB private, *above* the 200 MB baseline. Measured root cause: the
+  trim took effect (DX12-only verified, no Vulkan/GL mapped) but footprint is dominated by the DX12
+  driver-stack private heap (`amdxc64.dll` 44.8 MB + `d3dcompiler`/`D3D12Core`), which the backend-trim
+  can't touch. **Backend-trim retired as the memory lever; §12's <100 MB target likely unreachable on
+  DX12/wgpu.** → **Follow-up (new work, does not reopen 0011):** measure the bare wgpu driver floor,
+  then revise NFR §12 or profile pipeline/shader count as the real lever. Still-standing on-device
+  checks: live-foobar overlay/log (like Plan 0004) and macOS RSS (`rss.rs`, pending a Mac — Plan 0001).
+  **Nits (non-blocking):** (a)
   `LmvMetrics.draw_calls` counts render passes, not GPU draw calls — name slightly wider than the value;
   (b) `foo_lmv.cpp` adds a third hardcoded app-dir literal (the Plan 0007 shared-path minor, not new).
 

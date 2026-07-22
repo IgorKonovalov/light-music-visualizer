@@ -36,10 +36,24 @@ draw calls — the name reads slightly wider than the value; a one-word doc twea
 ambiguity. (b) `foo_lmv.cpp` adds a third hardcoded `\light-music-visualizer` app-dir literal — the
 same shared-path-convention minor already carried forward from Plan 0007, not new debt.
 
-**Carry-forward (human):** Phase 7 — before/after RSS + fps on the older Windows iGPU box (NFR §9),
-confirming the footprint drop toward the §12 "well under ~100 MB" target with no §1 perf-floor
-regression. Plus the standing on-device checks: the live foobar overlay toggle + log writing (like
-Plan 0004's done-whens) and macOS RSS (`rss.rs`, unvalidated pending a Mac — Plan 0001 carry-forward).
+**Phase 7 outcome (2026-07-22, human smoke, Windows AMD iGPU box):** fps unchanged before/after the
+trim (~165 fps @ 1080p — **no §1 perf-floor regression**, the risk Phase 7 guarded). Overlay + title
+parity verified on-device (F3 overlay renders the sparkline/bar/digits; title shows core-sourced fps +
+p99). **Footprint did NOT drop — the §12 win failed.** Release-build `lmv.exe` measured ~300 MB working
+set / **343 MB private commit**, *above* the ~200 MB Plan 0001 baseline and far above the §12 "well
+under ~100 MB" target. Root cause (measured, not guessed): the trim took effect (verified DX12-only at
+runtime — no Vulkan/GL loader mapped) but footprint is dominated by the **DX12 driver-stack private
+heap** (largest module `amdxc64.dll` 44.8 MB + `d3dcompiler_47`/`D3D12Core`/`d3d11`); mapped DLL *code*
+is only 135 MB and shared. Dropping wgpu's Vulkan/GL Rust backends can't touch the driver heap.
+**The backend-trim is retired as the memory lever.** Growth vs baseline is most plausibly the added
+render pipelines/shaders from Plans 0003/0010/0011 (each driver-compiled pipeline grows that heap).
+
+**Follow-up (routed out of this plan):** a memory investigation — measure the bare wgpu/DX12 driver
+floor on the same box, then either revise NFR §12 to a realistic floor (architect NFR amendment, driver
+stack as fixed cost) or profile pipeline/shader/resource count as the real lever if we add much on top.
+This does not reopen Plan 0011 (its diagnostics harness + the — effective but insufficient — trim both
+landed); it is new work. Still-standing on-device checks unrelated to footprint: live foobar overlay +
+log (like Plan 0004's done-whens) and macOS RSS (`rss.rs`, pending a Mac — Plan 0001 carry-forward).
 
 ## TL;DR
 
