@@ -53,13 +53,74 @@ fn system_slot(system: SystemKind) -> usize {
     }
 }
 
+/// The loaded presets plus the active index — the pure, GPU-free part of
+/// selection. Split out of [`Renderer`] so the addressing contract (names in
+/// roster order, in-range select, out-of-range no-op) is unit-testable without a
+/// surface, mirroring how the diagnostics stats are a pure type behind the GPU
+/// [`Renderer`]. [`Renderer`]'s preset methods delegate here 1:1.
+struct Roster {
+    presets: Vec<Preset>,
+    active: usize,
+}
+
+impl Roster {
+    fn new(presets: Vec<Preset>) -> Self {
+        Self { presets, active: 0 }
+    }
+
+    /// Replace the roster; reset `active` to the start if it now points past the
+    /// end. An empty set is ignored — a directory that briefly reads empty or
+    /// all-malformed leaves the last good roster rendering (NFR 10).
+    fn set_presets(&mut self, presets: Vec<Preset>) {
+        if presets.is_empty() {
+            return;
+        }
+        self.presets = presets;
+        if self.active >= self.presets.len() {
+            self.active = 0;
+        }
+    }
+
+    /// Advance to the next preset (wrapping); a no-op on an empty roster.
+    fn cycle(&mut self) {
+        if !self.presets.is_empty() {
+            self.active = (self.active + 1) % self.presets.len();
+        }
+    }
+
+    /// Set the active preset **iff** `index` is in range; an out-of-range index
+    /// is a no-op — never a panic, never a wrap.
+    fn select(&mut self, index: usize) {
+        if index < self.presets.len() {
+            self.active = index;
+        }
+    }
+
+    /// The active preset, or `None` on an empty roster.
+    fn active_preset(&self) -> Option<&Preset> {
+        self.presets.get(self.active)
+    }
+
+    /// The active preset's name, or a placeholder on an empty roster.
+    fn name(&self) -> &str {
+        self.active_preset()
+            .map(|p| p.name.as_str())
+            .unwrap_or("no presets")
+    }
+
+    /// The loaded preset names in roster order.
+    fn names(&self) -> impl Iterator<Item = &str> {
+        self.presets.iter().map(|p| p.name.as_str())
+    }
+}
+
 /// Owns the GPU context, the built-in systems, and the loaded presets; renders
 /// one frame per call by evaluating the active preset into the active system.
 pub struct Renderer {
     ctx: RenderContext,
     scenes: Vec<Box<dyn Scene>>,
-    presets: Vec<Preset>,
-    active: usize,
+    /// Loaded presets + the active index (pure selection state — see [`Roster`]).
+    roster: Roster,
     /// Shared scene clock (seconds), advanced one fixed step per rendered frame.
     /// The single source for both an expression's `time` and system animation.
     time: f32,
@@ -89,8 +150,7 @@ impl Renderer {
         Ok(Self {
             ctx,
             scenes,
-            presets: crate::preset::default_presets(),
-            active: 0,
+            roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
             overlay,
@@ -127,8 +187,7 @@ impl Renderer {
         Ok(Self {
             ctx,
             scenes,
-            presets: crate::preset::default_presets(),
-            active: 0,
+            roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
             overlay,
@@ -146,21 +205,28 @@ impl Renderer {
     /// set is ignored so a preset directory that briefly reads empty — or whose
     /// files are all malformed — leaves the last good roster rendering (NFR 10).
     pub fn set_presets(&mut self, presets: Vec<Preset>) {
-        if presets.is_empty() {
-            return;
-        }
-        self.presets = presets;
-        if self.active >= self.presets.len() {
-            self.active = 0;
-        }
+        self.roster.set_presets(presets);
     }
 
     /// Switch to the next preset; returns its name. Instant — every system is
     /// built at startup, so cycling never hitches a live show.
     pub fn cycle_preset(&mut self) -> &str {
-        if !self.presets.is_empty() {
-            self.active = (self.active + 1) % self.presets.len();
-        }
+        self.roster.cycle();
+        self.preset_name()
+    }
+
+    /// The loaded preset names in roster order — the browse overlay's list
+    /// source (Plan 0008). Selection addresses these by absolute index.
+    pub fn preset_names(&self) -> impl Iterator<Item = &str> {
+        self.roster.names()
+    }
+
+    /// Jump to the preset at `index` (its absolute position in
+    /// [`preset_names`](Self::preset_names)); returns the now-active name. An
+    /// out-of-range `index` is a no-op (never a panic, never a wrap), so a stale
+    /// index from a shrunk hot-reloaded roster is harmless.
+    pub fn select_preset(&mut self, index: usize) -> &str {
+        self.roster.select(index);
         self.preset_name()
     }
 
@@ -198,17 +264,14 @@ impl Renderer {
 
     /// Name of the currently active preset.
     pub fn preset_name(&self) -> &str {
-        self.presets
-            .get(self.active)
-            .map(|p| p.name.as_str())
-            .unwrap_or("no presets")
+        self.roster.name()
     }
 
     /// Name of the built-in system the active preset drives (e.g. the frontend
     /// shows it next to the preset name).
     pub fn active_system_name(&self) -> &'static str {
-        self.presets
-            .get(self.active)
+        self.roster
+            .active_preset()
             .and_then(|p| self.scenes.get(system_slot(p.system)))
             .map(|scene| scene.name())
             .unwrap_or("")
@@ -223,8 +286,7 @@ impl Renderer {
         let Self {
             ctx,
             scenes,
-            presets,
-            active,
+            roster,
             time,
             diag,
             overlay,
@@ -242,7 +304,7 @@ impl Renderer {
                 * SWAPCHAIN_IMAGE_COUNT,
         );
 
-        let Some(preset) = presets.get(*active) else {
+        let Some(preset) = roster.active_preset() else {
             return Ok(()); // no presets loaded — nothing to draw
         };
         let Some(scene) = scenes.get_mut(system_slot(preset.system)) else {
@@ -355,5 +417,59 @@ impl Renderer {
             }
             C::Validation => Err(RenderError::SurfaceValidation),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // The pure roster contract, tested without a GPU surface (a live `Renderer`
+    // can't be built headlessly). The `Renderer::preset_names`/`select_preset`
+    // wrappers delegate to `Roster` 1:1, so this covers the addressing contract
+    // Plan 0008 Phase 2 names. Test asserts use `expect`, allowed here over the
+    // file's hot-path panic-denial pragma — test code is not the render path.
+    #![allow(clippy::expect_used, clippy::indexing_slicing)]
+
+    use super::Roster;
+    use crate::preset::Preset;
+
+    /// A minimal valid preset: a known system + explicit name, no params.
+    fn preset(name: &str) -> Preset {
+        Preset::from_toml_str(&format!("system = \"swarm\"\nname = \"{name}\""))
+            .expect("hand-written test preset is valid")
+    }
+
+    fn roster(names: &[&str]) -> Roster {
+        Roster::new(names.iter().map(|n| preset(n)).collect())
+    }
+
+    #[test]
+    fn names_are_yielded_in_roster_order() {
+        let r = roster(&["alpha", "bravo", "charlie"]);
+        let got: Vec<&str> = r.names().collect();
+        assert_eq!(got, ["alpha", "bravo", "charlie"]);
+    }
+
+    #[test]
+    fn select_addresses_by_absolute_index() {
+        let mut r = roster(&["alpha", "bravo", "charlie"]);
+        assert_eq!(r.name(), "alpha"); // a fresh roster starts at index 0
+        r.select(2);
+        assert_eq!(r.name(), "charlie"); // the third entry
+    }
+
+    #[test]
+    fn out_of_range_select_is_a_no_op() {
+        let mut r = roster(&["alpha", "bravo", "charlie"]);
+        r.select(1);
+        r.select(999); // past the end: unchanged — no panic, no wrap
+        assert_eq!(r.name(), "bravo");
+    }
+
+    #[test]
+    fn set_presets_clamps_active_when_the_roster_shrinks() {
+        let mut r = roster(&["alpha", "bravo", "charlie"]);
+        r.select(2);
+        r.set_presets(vec![preset("solo")]); // index 2 now out of range
+        assert_eq!(r.name(), "solo");
     }
 }
