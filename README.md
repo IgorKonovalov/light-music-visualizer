@@ -57,6 +57,7 @@ standalone/          # Rust binary crate — winit window + wgpu surface + OS lo
 plugin-foobar/       # C++ shim: foobar2000 SDK integration, links the core's C ABI. Windows-first.
 docs/
 ├── nfr.md           # Quantified v1 non-functional requirements (the numbers behind "lightweight").
+├── presets.md       # Preset authoring guide + shipped-library reference (systems, params, expressions).
 ├── adrs/            # Architecture Decision Records + rejected alternatives. Append-only.
 └── plans/           # Phased implementation plans (what's in flight); done/ holds completed plans.
 ```
@@ -77,6 +78,18 @@ This is real-time audio + graphics, so a few rules are non-negotiable:
 - **The C ABI is a versioned contract.** Minimal surface — opaque handle, push-samples,
   render, resize, free. Changing its shape is an ADR-worthy event.
 - **Lightweight is a feature.** Small binaries, few dependencies, low idle CPU/GPU.
+
+## Presets
+
+Visuals are driven by **presets** — small TOML files that bind a built-in
+rendering system's parameters to short expressions over the live audio analysis
+(no Rust, no rebuild). Ten curated presets ship across two systems (a
+domain-warped fragment field and a ~10k-particle swarm), seeded into a per-user
+directory that both the standalone app and the foobar plugin share.
+
+See **[`docs/presets.md`](docs/presets.md)** for the full authoring guide and
+library reference: every shipped preset, the two systems and their parameters,
+the expression variables/functions, and where the files live on disk.
 
 ## Architecture decisions
 
