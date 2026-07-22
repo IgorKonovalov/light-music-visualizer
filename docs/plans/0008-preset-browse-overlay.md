@@ -1,6 +1,6 @@
 # 0008 — In-app preset browse overlay (standalone): on-canvas text + keyboard picker
 
-> **Status:** approved
+> **Status:** in-progress
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev
 > **Related ADRs:** [ADR-0009](../adrs/0009-glyphon-text-rendering.md) — adopt glyphon for

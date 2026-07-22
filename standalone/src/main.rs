@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use diaglog::DiagLog;
 use lmv_core::audio::{AudioFormat, SampleConsumer};
 use lmv_core::dsp::Analyzer;
-use lmv_core::render::Renderer;
+use lmv_core::render::{Renderer, TextRun};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -36,6 +36,12 @@ const PRESET_POLL: Duration = Duration::from_millis(500);
 /// frame-count cadence keeps the shell clock-free for the title; the numbers
 /// themselves come from the core's diagnostics.
 const TITLE_UPDATE_FRAMES: u32 = 30;
+
+/// On-canvas active-preset-name label: top-left inset (device px), font size,
+/// and a light near-white color legible over most scenes.
+const NAME_INSET: f32 = 16.0;
+const NAME_SIZE: f32 = 28.0;
+const NAME_COLOR: [f32; 4] = [0.9, 0.95, 1.0, 1.0];
 
 struct AppState {
     window: Arc<Window>,
@@ -165,6 +171,18 @@ impl AppState {
         }
         self.poll_presets();
         let frame = self.analyzer.take_frame();
+
+        // Draw the active preset name on the canvas (not just the title bar).
+        // Owned first so the renderer borrow for `queue_text` is exclusive.
+        let name = self.renderer.preset_name().to_owned();
+        self.renderer.queue_text(&[TextRun {
+            text: &name,
+            x: NAME_INSET,
+            y: NAME_INSET,
+            size: NAME_SIZE,
+            color: NAME_COLOR,
+        }]);
+
         if let Err(err) = self.renderer.render(&frame) {
             eprintln!("render error: {err}");
         }

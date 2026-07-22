@@ -21,6 +21,8 @@ pub mod context;
 pub mod overlay;
 mod overlay_font;
 pub mod scenes;
+#[cfg(feature = "text")]
+pub mod text;
 
 use crate::diag::{Diag, Metrics};
 use crate::dsp::AnalysisFrame;
@@ -28,6 +30,10 @@ use crate::preset::{Preset, SystemKind, Variables};
 pub use context::{RenderContext, RenderError};
 use overlay::Overlay;
 use scenes::Scene;
+#[cfg(feature = "text")]
+use text::TextLayer;
+#[cfg(feature = "text")]
+pub use text::TextRun;
 
 /// Assumed bytes-per-pixel for the swapchain GPU-byte estimate (the common
 /// 8-bit RGBA/BGRA surface formats). An approximation, per ADR-0008.
@@ -61,6 +67,10 @@ pub struct Renderer {
     diag: Diag,
     /// The debug overlay pass, painted only while `diag.overlay_enabled()`.
     overlay: Overlay,
+    /// On-canvas text seam (browse overlay / HUD), standalone-only via the
+    /// `text` feature (ADR-0009); absent from the plugin/default build.
+    #[cfg(feature = "text")]
+    text_layer: TextLayer,
 }
 
 impl Renderer {
@@ -74,6 +84,8 @@ impl Renderer {
         let ctx = RenderContext::new(target, width, height)?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
+        #[cfg(feature = "text")]
+        let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
         Ok(Self {
             ctx,
             scenes,
@@ -82,6 +94,8 @@ impl Renderer {
             time: 0.0,
             diag: Diag::new(),
             overlay,
+            #[cfg(feature = "text")]
+            text_layer,
         })
     }
 
@@ -108,6 +122,8 @@ impl Renderer {
         let ctx = unsafe { RenderContext::new_unsafe(target, width, height) }?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
+        #[cfg(feature = "text")]
+        let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
         Ok(Self {
             ctx,
             scenes,
@@ -116,6 +132,8 @@ impl Renderer {
             time: 0.0,
             diag: Diag::new(),
             overlay,
+            #[cfg(feature = "text")]
+            text_layer,
         })
     }
 
@@ -144,6 +162,15 @@ impl Renderer {
             self.active = (self.active + 1) % self.presets.len();
         }
         self.preset_name()
+    }
+
+    /// Queue text runs to composite over the next rendered frame; the queue is
+    /// cleared after each `render`. The standalone fills it each frame with the
+    /// active preset name and, while the browse overlay is open, its rows. A
+    /// `text`-feature (standalone) path — the plugin/default build has no text.
+    #[cfg(feature = "text")]
+    pub fn queue_text(&mut self, runs: &[TextRun<'_>]) {
+        self.text_layer.queue(runs);
     }
 
     /// Enable or disable rolling frame-time collection — the gated diagnostics
@@ -201,6 +228,8 @@ impl Renderer {
             time,
             diag,
             overlay,
+            #[cfg(feature = "text")]
+            text_layer,
         } = self;
 
         // Core-tracked GPU footprint: the swapchain dominates what the core
@@ -253,8 +282,39 @@ impl Renderer {
         let aspect = ctx.config.width as f32 / ctx.config.height.max(1) as f32;
         scene.render(&ctx.queue, &mut encoder, &view, aspect);
 
-        // One scene pass, plus the overlay's single instanced draw when enabled.
+        // One scene pass, plus the optional text and overlay passes below.
         let mut draw_calls = 1u32;
+
+        // On-canvas text (browse overlay / HUD): a second pass that loads the
+        // scene and composites the queued runs on top, in the same frame
+        // (ADR-0009). Standalone-only via the `text` feature; when both this and
+        // the diagnostics overlay are on, the overlay draws last so it sits on
+        // top of the text.
+        #[cfg(feature = "text")]
+        {
+            if text_layer.prepare(&ctx.device, &ctx.queue, ctx.config.width, ctx.config.height) {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("lmv-text-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            // Load: composite over the scene already in the surface.
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                text_layer.render(&mut pass);
+                draw_calls += 1;
+            }
+        }
+
         if diag.overlay_enabled() {
             let metrics = diag.metrics();
             overlay.render(
@@ -270,6 +330,10 @@ impl Renderer {
 
         ctx.queue.submit(std::iter::once(encoder.finish()));
         ctx.queue.present(surface_tex);
+
+        // Free atlas glyphs unused this frame and clear the queue for the next.
+        #[cfg(feature = "text")]
+        text_layer.end_frame();
 
         diag.set_draw_calls(draw_calls);
         diag.record_frame();

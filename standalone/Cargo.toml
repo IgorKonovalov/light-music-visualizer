@@ -17,7 +17,9 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-lmv-core = { path = "../core" }
+# `text` enables the glyphon on-canvas text seam (ADR-0009) — the standalone is
+# the only frontend that opts in; the plugin build leaves it off.
+lmv-core = { path = "../core", features = ["text"] }
 # Windowing (ADR-0001 fixes winit for the standalone shell).
 winit = "=0.30.13"
 

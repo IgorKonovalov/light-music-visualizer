@@ -46,6 +46,17 @@ bytemuck = { version = "=1.25.2", features = ["derive"] }
 # schema declarative. Both pinned exact per NFR 4.
 serde = { version = "=1.0.229", features = ["derive"] }
 toml = "=1.1.3"
+# On-canvas text for the standalone browse overlay / HUD (ADR-0009), behind the
+# non-default `text` feature so the plugin/default/core-test build never carries
+# its sizable tree. Pinned to the glyphon release whose wgpu dep resolves to our
+# =30.0.0 (0.12.0 -> wgpu ^30); a wgpu bump would need a matching glyphon bump.
+glyphon = { version = "=0.12.0", optional = true }
+
+[features]
+# On-canvas text rendering (glyphon). Off by default: only the standalone opts
+# in (ADR-0009); the plugin cdylib/staticlib, the default `cargo build`, and the
+# core test suite all compile glyphon out entirely.
+text = ["dep:glyphon"]
 
 # Per-OS wgpu backend (NFR 12). Only the shipped backend compiles: DX12 on
 # Windows, Metal on macOS. NFR 2 already fixes DX12 as the Windows baseline and
