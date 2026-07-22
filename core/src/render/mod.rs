@@ -39,7 +39,7 @@ const SWAPCHAIN_BYTES_PER_PIXEL: u64 = 4;
 const SWAPCHAIN_IMAGE_COUNT: u64 = 2;
 
 /// A preset's system to its slot in the roster built by [`scenes::create_all`].
-/// The legacy scenes occupy later slots but no preset addresses them.
+/// The roster holds only preset-addressed systems, in this slot order.
 fn system_slot(system: SystemKind) -> usize {
     match system {
         SystemKind::FragmentField => 0,

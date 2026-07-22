@@ -16,9 +16,6 @@
 )]
 
 pub mod fragment_field;
-pub mod pulse;
-pub mod spectrum;
-pub mod starfield;
 pub mod swarm;
 
 use crate::dsp::AnalysisFrame;
@@ -30,10 +27,10 @@ pub(crate) const SCENE_DT: f32 = 1.0 / 60.0;
 /// One visual. `update` advances state from the analysis frame; `render` draws
 /// with the state it has.
 ///
-/// Preset-driven systems (fragment field, swarm) additionally implement the
-/// named-parameter surface — `set_time`, `reset_params`, `set_param` — that the
-/// preset layer evaluates into per frame (ADR-0002). Legacy scenes inherit the
-/// no-op defaults and stay frame-driven.
+/// Both built-in systems (fragment field, swarm) are preset-driven and
+/// implement the named-parameter surface — `set_time`, `reset_params`,
+/// `set_param` — that the preset layer evaluates into per frame (ADR-0002). The
+/// trait carries no-op defaults so a future non-parametric scene need not.
 pub(crate) trait Scene {
     fn name(&self) -> &'static str;
     fn update(&mut self, frame: &AnalysisFrame);
@@ -67,9 +64,6 @@ pub(crate) fn create_all(
             surface_format,
         )),
         Box::new(swarm::SwarmScene::new(device, surface_format)),
-        Box::new(spectrum::SpectrumScene::new(device, surface_format)),
-        Box::new(pulse::PulseScene::new(device, surface_format)),
-        Box::new(starfield::StarfieldScene::new(device, surface_format)),
     ]
 }
 
@@ -99,19 +93,4 @@ impl SeededRng {
     pub(crate) fn range(&mut self, lo: f32, hi: f32) -> f32 {
         lo + (hi - lo) * self.next_f32()
     }
-}
-
-/// Mean of the lowest bands — a serviceable bass proxy for scenes.
-#[allow(
-    clippy::indexing_slicing,
-    reason = "n = 8 is a compile-time constant <= SPECTRUM_BINS (64), so the slice is always in-bounds"
-)]
-pub(crate) fn bass_level(frame: &AnalysisFrame) -> f32 {
-    let n = 8;
-    frame.spectrum[..n].iter().sum::<f32>() / n as f32
-}
-
-/// Mean over the full spectrum — overall energy.
-pub(crate) fn energy_level(frame: &AnalysisFrame) -> f32 {
-    frame.spectrum.iter().sum::<f32>() / frame.spectrum.len() as f32
 }
