@@ -13,6 +13,8 @@
 
 use wgpu::{CreateSurfaceError, RequestAdapterError, RequestDeviceError, SurfaceTarget};
 
+use crate::audio::FormatError;
+
 /// Offscreen texture format for the headless capture path (Plan 0013). A tight
 /// 8-bit RGBA the readback strips straight into a [`crate::render::CaptureImage`].
 pub(crate) const HEADLESS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -36,6 +38,9 @@ pub enum RenderError {
     CaptureReadback,
     /// A capture requested a preset name not in the loaded roster (Plan 0013).
     UnknownPreset(String),
+    /// An audio-driven capture was handed a PCM format the analyzer rejected at
+    /// the intake boundary (Plan 0013).
+    AudioFormat(FormatError),
 }
 
 impl std::fmt::Display for RenderError {
@@ -54,6 +59,7 @@ impl std::fmt::Display for RenderError {
             RenderError::UnknownPreset(name) => {
                 write!(f, "no preset named '{name}' in the roster")
             }
+            RenderError::AudioFormat(e) => write!(f, "invalid audio format for capture: {e}"),
         }
     }
 }

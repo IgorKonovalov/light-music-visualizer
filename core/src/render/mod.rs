@@ -26,6 +26,7 @@ pub mod scenes;
 #[cfg(feature = "text")]
 pub mod text;
 
+use crate::audio::AudioFormat;
 use crate::diag::{Diag, Metrics};
 use crate::dsp::AnalysisFrame;
 use crate::preset::{Preset, SystemKind, Variables};
@@ -559,6 +560,82 @@ impl Renderer {
         self.text_layer.end_frame();
 
         capture::read_back(&self.ctx.device, &buffer, width, height, padded_bpr)
+    }
+
+    /// Drive preset `name` with **real audio through the real analyzer** and
+    /// capture the frames at `at_frames` (Plan 0013). The PCM is fed hop-by-hop
+    /// into a fresh [`Analyzer`](crate::dsp::Analyzer) (format validated at the
+    /// intake boundary — the source-agnostic rule); each produced
+    /// [`AnalysisFrame`] drives one rendered frame, so `at_frames` indexes the
+    /// hop sequence (frame 0 is the first hop). Deterministic: scenes are rebuilt
+    /// to their seed and the clock resets to 0, exactly like [`capture_preset`].
+    ///
+    /// This is in-memory PCM only — no file, decoder, or OS audio-source code,
+    /// just like a frontend pushing samples. Returned images are in `at_frames`
+    /// order; an index past the audio length is an error.
+    pub fn capture_audio(
+        &mut self,
+        name: &str,
+        pcm: &[f32],
+        format: AudioFormat,
+        at_frames: &[u32],
+    ) -> Result<Vec<CaptureImage>, RenderError> {
+        if !self.select_preset_by_name(name) {
+            return Err(RenderError::UnknownPreset(name.to_string()));
+        }
+        let mut analyzer = crate::dsp::Analyzer::new(format).map_err(RenderError::AudioFormat)?;
+
+        self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
+        self.time = 0.0;
+
+        let (width, height) = (self.ctx.config.width, self.ctx.config.height);
+        let target_format = self.ctx.surface_format();
+        let (texture, view) =
+            capture::create_target(&self.ctx.device, target_format, width, height);
+
+        let hop_samples = crate::dsp::HOP_SIZE * format.channels as usize;
+        let mut captured: Vec<(u32, CaptureImage)> = Vec::with_capacity(at_frames.len());
+
+        for (index, hop) in pcm.chunks(hop_samples).enumerate() {
+            let frame_index = index as u32;
+            analyzer.push_interleaved(hop);
+            let analysis = analyzer.take_frame();
+            self.time += scenes::SCENE_DT;
+
+            let wanted = at_frames.contains(&frame_index)
+                && !captured.iter().any(|(i, _)| *i == frame_index);
+            if wanted {
+                let (buffer, padded_bpr) =
+                    capture::create_readback(&self.ctx.device, width, height);
+                let mut encoder =
+                    self.ctx
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("lmv-capture-audio"),
+                        });
+                capture::record_clear(&mut encoder, &view);
+                let _ = self.draw_frame(&analysis, &mut encoder, &view, width, height);
+                capture::record_copy(&mut encoder, &texture, &buffer, padded_bpr, width, height);
+                self.ctx.queue.submit(std::iter::once(encoder.finish()));
+                #[cfg(feature = "text")]
+                self.text_layer.end_frame();
+                let img = capture::read_back(&self.ctx.device, &buffer, width, height, padded_bpr)?;
+                captured.push((frame_index, img));
+            } else {
+                self.step_offscreen(&analysis, &view, width, height);
+            }
+        }
+
+        at_frames
+            .iter()
+            .map(|idx| {
+                captured
+                    .iter()
+                    .find(|(i, _)| i == idx)
+                    .map(|(_, img)| img.clone())
+                    .ok_or(RenderError::CaptureReadback)
+            })
+            .collect()
     }
 
     /// Draw one frame into `view` and submit it — advancing scene state without
