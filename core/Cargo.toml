@@ -27,8 +27,16 @@ lmv-ring = { path = "../lmv-ring" }
 # no unsafe SIMD requirements — well under the NFR 4 dependency gate.
 rustfft = "=6.4.1"
 # The GPU abstraction ADR-0001 commits to; its transitive weight is the one
-# accepted fixed cost (NFR 4).
-wgpu = "=30.0.0"
+# accepted fixed cost (NFR 4). Backends are gated per-OS (NFR 12 primary memory
+# lever): default features are off and the shipped backend is added below, so
+# only one backend's code compiles - dropping the Vulkan/GL/WebGPU paths that are
+# dead weight on the shipped target. `wgsl` keeps our shader frontend; `std` and
+# `parking_lot` match wgpu's native defaults.
+wgpu = { version = "=30.0.0", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "wgsl",
+] }
 # Blocks on wgpu's async adapter/device futures at init time. Zero deps.
 pollster = "=1.0.1"
 # Safe [f32] -> [u8] casts for uniform uploads. Zero deps.
@@ -38,3 +46,15 @@ bytemuck = { version = "=1.25.2", features = ["derive"] }
 # schema declarative. Both pinned exact per NFR 4.
 serde = { version = "=1.0.229", features = ["derive"] }
 toml = "=1.1.3"
+
+# Per-OS wgpu backend (NFR 12). Only the shipped backend compiles: DX12 on
+# Windows, Metal on macOS. NFR 2 already fixes DX12 as the Windows baseline and
+# NFR does the same for Metal on macOS, so no supported machine loses rendering
+# by dropping the Vulkan/GL fallback (recorded in Plan 0011 risks, not an ADR).
+# default-features stays off here too so these declarations don't re-enable the
+# dropped backends when Cargo unions the feature sets.
+[target.'cfg(windows)'.dependencies]
+wgpu = { version = "=30.0.0", default-features = false, features = ["dx12"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "=30.0.0", default-features = false, features = ["metal"] }

@@ -106,6 +106,11 @@ impl RenderContext {
             .ok_or(RenderError::UnsupportedSurface)?;
         // Vsync everywhere; the render loop paces itself off the display.
         config.present_mode = wgpu::PresentMode::AutoVsync;
+        // Explicit swapchain depth (NFR 12 secondary lever): pin a 2-frame
+        // latency (double-buffered) rather than leaving it to the backend
+        // default, so the in-flight image count - and its VRAM - is bounded and
+        // stated, not implicit.
+        config.desired_maximum_frame_latency = 2;
         surface.configure(&device, &config);
 
         Ok(Self {
