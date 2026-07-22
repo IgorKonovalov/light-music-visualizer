@@ -19,7 +19,7 @@ you need a code comment.
 | [0006](0006-c-abi-v2-preset-loading.md) | C ABI v2: add lmv_load_presets (seed-then-load); bump to v2 | accepted |
 | [0007](0007-line-geometry-generators.md) | Line-geometry generators: cached-build built-in category + instanced-quad line rendering | proposed |
 | [0008](0008-c-abi-v3-diagnostics.md) | C ABI v3: diagnostics query (lmv_get_metrics) + debug-overlay toggle (lmv_set_debug); bump to v3 | accepted |
-| [0009](0009-glyphon-text-rendering.md) | Adopt glyphon for standalone on-canvas text (feature-gated) | proposed |
+| [0009](0009-glyphon-text-rendering.md) | Adopt glyphon for standalone on-canvas text (feature-gated) | accepted |
 | [0010](0010-accept-gpu-driver-memory-floor.md) | Accept the DX12/wgpu driver-stack memory floor; retarget the runtime-memory NFR (§12) | accepted |
 | [0011](0011-image-crate-for-capture-tooling.md) | Use the `image` crate (dev-dependency only) for headless-capture PNG I/O and golden compare | proposed |
 | [0012](0012-stateful-feedback-render-system.md) | Stateful feedback render system: ping-pong offscreen simulation + fixed-timestep accumulator (Gray-Scott first) | proposed |

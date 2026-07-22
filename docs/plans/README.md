@@ -9,7 +9,6 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0008](0008-preset-browse-overlay.md) | In-app preset browse overlay (standalone) | approved | Give the standalone a keyboard-driven browse overlay over the running visual: a key opens a scrollable list of preset names, arrows move a highlight, typing narrows it (type-to-filter), Enter jumps straight to that preset, Esc closes. Needs the codebase's first text rendering — **glyphon** behind a core `text` cargo feature ([ADR-0009](../adrs/0009-glyphon-text-rendering.md)), via a reusable `render::text` seam Plan 0009's HUD later shares. Adds `Renderer::preset_names`/`select_preset`; overlay logic is a pure unit-tested `OverlayState` in the shell. Standalone-only (plugin stays cycle-only), keyboard-only, C ABI untouched. The interview's chosen selection UX, split out of Plan 0007. |
 | [0009](0009-live-performance-features.md) | Live performance features (standalone) | approved | Drive a live DJ show onto a projector from the standalone: borderless-fullscreen on a chosen display, line-in / audio-interface capture (alongside loopback), self-rotating scenes (energy/drop-biased) with a manual hotkey override, experimental track-change detection (core DSP nudge), and a ≥4-hour instrumented soak. Operator choices persist in a per-user `config.toml`. Standalone-only via the native Rust API + one deterministic DSP field in core; C ABI frozen, no ADR. MIDI deferred. Roadmap item 2 (NFR §10). |
 | [0010](0010-line-geometry-scenes.md) | Line-geometry scenes: parametric curves, L-systems, star patterns | approved | Add a line-art category to the built-in system vocabulary, ported from the user's Maurer rose / L-systems / Islamic star pattern sketches. One shared `LineRenderer` (segments -> instanced quads, thick + glowing) under two build models: a cheap **parametric** system sampled per frame (the rose) and an expensive **generator** system built at preset load and cached (L-systems, star patterns). Continuous audio drives transform/hue/draw-on every frame; beat accents advance precomputed structural states. New `[curve]`/`[generator]` TOML config table + one optional `Scene::configure` hook ([ADR-0007](../adrs/0007-line-geometry-generators.md)); extends ADR-0002 layer 2. Core-only, C ABI frozen. Preset files ride Plan 0007's seeding. |
 | [0014](0014-reaction-diffusion-feedback-scene.md) | Reaction-diffusion feedback scene + frame-rate-independent render clock | approved | The engine's first **stateful feedback** scene: a Gray-Scott reaction-diffusion simulation (evolving nested contours / cellular tissue / hatched restructuring maze) on a new reusable `render::feedback::PingPongField` (two offscreen `Rgba16Float` textures swapped each sub-step, fixed internal grid, present pass composites to the surface). Driven by a **fixed-timestep accumulator fed by real injected `dt`** so it looks identical on any device over wall-clock time — the core stays clock-free (Plan 0013 capture feeds a fixed `dt` for reproducibility). Delivering `dt` at the render seam (`Renderer::render(&frame, dt)`) lets us **converge the shared scene clock globally and retire `SCENE_DT`**, making every existing scene frame-rate-independent (resolves the standing SCENE_DT wish). Audio drives it via existing named params (ADR-0002 layer 2): bands modulate feed/kill/flow, beats stamp seeds. Adds C ABI **v4 `lmv_render_dt`** ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md), additive; `lmv_render` becomes the 1/60 wrapper) so the foobar plugin gets parity. New feedback render system per [ADR-0012](../adrs/0012-stateful-feedback-render-system.md); rejected warp-feedback advection, engine-managed multi-pass, per-frame stepping. Core + both frontends. Cross-plan dep: 0013's capture must thread a fixed `dt`. |
@@ -19,9 +18,9 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 A tactical ordering of the **active roster** (strategic themes live in the Roadmap below). One
 coupling drives it: **0014 depends on 0013's capture threading a fixed `dt`** while it retires
-`SCENE_DT`. (The earlier 0008/0013 `select_preset` overlap is already resolved — **Plan 0008 has
-landed**, so `Renderer::select_preset` exists and 0013 simply reuses it; 0013 Phase 2 no longer
-needs to add it. NB: 0008 still sits in the active roster above and needs a proper close.)
+`SCENE_DT`. (The earlier 0008/0013 `select_preset` overlap is resolved — **Plan 0008 has landed
+and closed**, so `Renderer::select_preset` exists and 0013 simply reuses it; 0013 Phase 2 no
+longer needs to add it.)
 
 1. **[0013] Capture / visual-QA harness first** — durable visual-feedback tooling: the agent can
    render, eyeball, and hard-test any scene with no display. Reuses the existing `select_preset`
@@ -48,6 +47,30 @@ needs to add it. NB: 0008 still sits in the active roster above and needs a prop
   iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0008 — In-app preset browse overlay (standalone)](done/0008-preset-browse-overlay.md) —
+  **done 2026-07-22**, passed Mode 4 review (no blockers, no majors). Four `dev` phase commits
+  (`3bef1a8`, `b0bb95e`, `43f3b39`, `9cc3234`). Landed the codebase's first text rendering:
+  **glyphon** behind a non-default core `text` feature ([ADR-0009](../adrs/0009-glyphon-text-rendering.md),
+  now **accepted**) via a reusable `render::text::TextLayer` seam (a second load-pass compositing
+  positioned `TextRun`s over the scene in one frame; Plan 0009's HUD reuses it). The standalone draws
+  the active preset name on-canvas, plus a Tab-toggled browse overlay: pure window-free `OverlayState`
+  (open/highlight/filter → `OverlayAction`) with arrow-nav, case-insensitive substring type-to-filter,
+  Enter selecting the **absolute** roster index, Esc closing, and hot-reload re-clamp. Selection landed
+  as `Renderer::preset_names`/`select_preset`, both delegating 1:1 to a new crate-private, unit-tested
+  `Roster` (the surface-free selection state — mirrors the FrameStats-behind-Diag pattern, since a live
+  `Renderer` can't be built headlessly). **C ABI untouched** (`LMV_ABI_VERSION` stays 2); the plugin
+  stays cycle-only. Verified: 41/41 tests (3 `Roster` + 11 `OverlayState`, incl. the absolute-index
+  and no-wrap asserts) green under nextest; clippy `-D warnings` clean on the `--features text` build;
+  `cargo tree` confirms glyphon absent from the default/plugin graph, present only in the standalone;
+  hygiene guard covers `text.rs`'s panic pragma and the glyphon exact-pin. **⚠ Carry-forward (human,
+  on-box):** Phases 1/3/4 visual done-whens ("legible on canvas", "switches the visual", "narrows
+  live") and the NFR 4 binary-size delta (release `lmv.exe` ≈ 7.6 MB with glyphon; the pre-glyphon
+  delta wasn't isolated — the standalone hard-enables `text`) are GPU/on-device judgments.
+  **Follow-up (not blocking):** a `--features text` core build check in CI (the two-shape build's green
+  is a local gate only this session), alongside the standing FFI/Miri CI notes. **Minor:** the browse
+  overlay's type-to-filter drops whitespace, so a preset name containing a space can't be fully matched
+  (Plan 0007's "filenames only" makes this latent, not live).
 
 - [0012 — Measure the driver-memory floor + cull dead scenes](done/0012-memory-floor-measure-and-scene-cull.md) —
   **done 2026-07-22**, passed Mode 4 review (no blockers, no majors). Two `dev` phase commits

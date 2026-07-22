@@ -1,6 +1,6 @@
 # ADR-0009 — Adopt glyphon for standalone on-canvas text (feature-gated)
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-22
 > **Related plan(s):** [0008](../plans/0008-preset-browse-overlay.md) — the in-app preset
 > browse overlay (this ADR's first consumer). Extends [ADR-0001](0001-rust-core-wgpu-cabi-foobar-shim.md)
