@@ -1,6 +1,6 @@
 # 0011 — Diagnostics harness + quick-win memory/perf trim
 
-> **Status:** approved
+> **Status:** in-progress
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev, human
 > **Related ADRs:** [0008](../adrs/0008-c-abi-v3-diagnostics.md) (C ABI v3: diagnostics query + overlay toggle)
