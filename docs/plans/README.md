@@ -3,7 +3,7 @@
 The one-minute "what's in flight" view. Read this first each session instead of
 re-deriving state from `git log`. Completed plans move to `done/`.
 
-**Next free number: 0015**
+**Next free number: 0016**
 
 ## Active roster
 
@@ -11,6 +11,7 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 |------|-----------------------------------------|--------|---------|
 | [0009](0009-live-performance-features.md) | Live performance features (standalone) | approved | Drive a live DJ show onto a projector from the standalone: borderless-fullscreen on a chosen display, line-in / audio-interface capture (alongside loopback), self-rotating scenes (energy/drop-biased) with a manual hotkey override, experimental track-change detection (core DSP nudge), and a ≥4-hour instrumented soak. Operator choices persist in a per-user `config.toml`. Standalone-only via the native Rust API + one deterministic DSP field in core; C ABI frozen, no ADR. MIDI deferred. Roadmap item 2 (NFR §10). |
 | [0010](0010-line-geometry-scenes.md) | Line-geometry scenes: parametric curves, L-systems, star patterns | approved | Add a line-art category to the built-in system vocabulary, ported from the user's Maurer rose / L-systems / Islamic star pattern sketches. One shared `LineRenderer` (segments -> instanced quads, thick + glowing) under two build models: a cheap **parametric** system sampled per frame (the rose) and an expensive **generator** system built at preset load and cached (L-systems, star patterns). Continuous audio drives transform/hue/draw-on every frame; beat accents advance precomputed structural states. New `[curve]`/`[generator]` TOML config table + one optional `Scene::configure` hook ([ADR-0007](../adrs/0007-line-geometry-generators.md)); extends ADR-0002 layer 2. Core-only, C ABI frozen. Preset files ride Plan 0007's seeding. |
+| [0015](0015-preset-dir-override-and-live-iteration.md) | Preset-directory override + live iteration (`LMV_PRESET_DIR`, shot flags) | draft | Edit one **version-controlled** `presets/*.toml` and see it live in **both** the running standalone app and the headless `shot` CLI, no rebuild. An `LMV_PRESET_DIR` env var (honored by both Rust frontends via a **single shared resolver** extracted into a `standalone` lib module) overrides the seeded `%APPDATA%` dir; the app hot-reloads it on a tightened ~150 ms poll (skipping seeding when overridden), and `shot` gets `--presets <dir>` / `--preset-file <path>` flags that beat the env var. Dependency-free (polling, **no** `notify` crate); framed as a power-user "custom preset folder" knob; consolidates Plan 0007's duplicated Rust resolver. Standalone + docs only, **C ABI untouched (v3)**; foobar plugin out of scope. [ADR-0014](../adrs/0014-preset-dir-override-for-dev-iteration.md); rejected app CLI args, symlink, `notify` watcher, duplicated resolver, core-side resolution. |
 | [0014](0014-reaction-diffusion-feedback-scene.md) | Reaction-diffusion feedback scene + frame-rate-independent render clock | approved | The engine's first **stateful feedback** scene: a Gray-Scott reaction-diffusion simulation (evolving nested contours / cellular tissue / hatched restructuring maze) on a new reusable `render::feedback::PingPongField` (two offscreen `Rgba16Float` textures swapped each sub-step, fixed internal grid, present pass composites to the surface). Driven by a **fixed-timestep accumulator fed by real injected `dt`** so it looks identical on any device over wall-clock time — the core stays clock-free (Plan 0013 capture feeds a fixed `dt` for reproducibility). Delivering `dt` at the render seam (`Renderer::render(&frame, dt)`) lets us **converge the shared scene clock globally and retire `SCENE_DT`**, making every existing scene frame-rate-independent (resolves the standing SCENE_DT wish). Audio drives it via existing named params (ADR-0002 layer 2): bands modulate feed/kill/flow, beats stamp seeds. Adds C ABI **v4 `lmv_render_dt`** ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md), additive; `lmv_render` becomes the 1/60 wrapper) so the foobar plugin gets parity. New feedback render system per [ADR-0012](../adrs/0012-stateful-feedback-render-system.md); rejected warp-feedback advection, engine-managed multi-pass, per-frame stepping. Core + both frontends. Cross-plan dep: 0013's capture must thread a fixed `dt`. |
 
 ## Recommended execution sequence
@@ -32,6 +33,12 @@ animation/sanity/beat/golden suite exist for the scene plans below to build agai
 3. **[0009] Live performance features** — largest, standalone, independent (C ABI frozen). This is
    Roadmap item 2 — bring it forward if the live-show milestone outranks the scene/tooling cluster
    (user's call; the ordering above is tactical, not a re-prioritization of the roadmap).
+
+**[0015] Preset-dir override** is small, standalone + docs only, and **independent of the coupling
+above** (no `core` change, C ABI frozen) — it can land anytime. It's a strong companion to the
+scene plans (0010/0014): the shared-preset iteration loop it adds — edit `presets/*.toml`, see it
+live in the app and `shot` — is exactly how a developer/agent will tune the new curves and feedback
+presets those plans introduce, so doing it **before or alongside** 0010/0014 pays for itself.
 
 ## Standing (not a plan)
 
