@@ -266,6 +266,19 @@ impl Renderer {
         self.preset_name()
     }
 
+    /// Make the preset named `name` active, returning whether it was found. A
+    /// by-name lookup layered over [`preset_names`](Self::preset_names) +
+    /// index-based [`select_preset`](Self::select_preset) (Plan 0013 capture
+    /// tooling — distinct from 0008's by-index selection). An unknown name
+    /// leaves the active preset unchanged.
+    pub fn select_preset_by_name(&mut self, name: &str) -> bool {
+        let Some(index) = self.preset_names().position(|n| n == name) else {
+            return false;
+        };
+        self.select_preset(index);
+        true
+    }
+
     /// Queue text runs to composite over the next rendered frame; the queue is
     /// cleared after each `render`. The standalone fills it each frame with the
     /// active preset name and, while the browse overlay is open, its rows. A
@@ -494,6 +507,83 @@ impl Renderer {
         capture::read_back(&self.ctx.device, &buffer, width, height, padded_bpr)
     }
 
+    /// Capture preset `name` after advancing it `frames` steps from a fixed
+    /// initial state, driven by a single constant `frame` (Plan 0013). A **pure
+    /// function** of `(name, frame, frames)`: the scenes are rebuilt so any
+    /// stateful system (e.g. the seeded swarm particles) starts from its
+    /// deterministic seed, and the scene clock resets to `0.0`, so the result is
+    /// independent of any earlier capture. Errors if `name` is not in the
+    /// roster. `frames` is treated as at least 1.
+    pub fn capture_preset(
+        &mut self,
+        name: &str,
+        frame: &AnalysisFrame,
+        frames: u32,
+    ) -> Result<CaptureImage, RenderError> {
+        if !self.select_preset_by_name(name) {
+            return Err(RenderError::UnknownPreset(name.to_string()));
+        }
+        // Reset simulation state to the deterministic seed and the clock to 0,
+        // so the same (name, frame, frames) always yields identical pixels and
+        // differential probes (Phase 3) isolate the stimulus, not history.
+        self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
+        self.time = 0.0;
+
+        let (width, height) = (self.ctx.config.width, self.ctx.config.height);
+        let format = self.ctx.surface_format();
+        let (texture, view) = capture::create_target(&self.ctx.device, format, width, height);
+
+        // Warm the scene through the first frames-1 steps (state advances, pixels
+        // discarded); then capture the final frame.
+        let n = frames.max(1);
+        for _ in 1..n {
+            self.time += scenes::SCENE_DT;
+            self.step_offscreen(frame, &view, width, height);
+        }
+        self.time += scenes::SCENE_DT;
+
+        let (buffer, padded_bpr) = capture::create_readback(&self.ctx.device, width, height);
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("lmv-capture-preset"),
+            });
+        capture::record_clear(&mut encoder, &view);
+        let _ = self.draw_frame(frame, &mut encoder, &view, width, height);
+        capture::record_copy(&mut encoder, &texture, &buffer, padded_bpr, width, height);
+        self.ctx.queue.submit(std::iter::once(encoder.finish()));
+
+        #[cfg(feature = "text")]
+        self.text_layer.end_frame();
+
+        capture::read_back(&self.ctx.device, &buffer, width, height, padded_bpr)
+    }
+
+    /// Draw one frame into `view` and submit it — advancing scene state without
+    /// reading anything back. The warm-up step [`capture_preset`] uses to reach
+    /// frame `N`.
+    fn step_offscreen(
+        &mut self,
+        frame: &AnalysisFrame,
+        view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+    ) {
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("lmv-capture-step"),
+            });
+        capture::record_clear(&mut encoder, view);
+        let _ = self.draw_frame(frame, &mut encoder, view, width, height);
+        self.ctx.queue.submit(std::iter::once(encoder.finish()));
+
+        #[cfg(feature = "text")]
+        self.text_layer.end_frame();
+    }
+
     fn acquire(ctx: &RenderContext) -> Result<Option<wgpu::SurfaceTexture>, RenderError> {
         use wgpu::CurrentSurfaceTexture as C;
         let Some(surface) = ctx.surface.as_ref() else {
@@ -594,5 +684,47 @@ mod tests {
             .chunks_exact(4)
             .any(|px| px[0] > 0 || px[1] > 0 || px[2] > 0);
         assert!(non_black, "the active preset drew at least one lit pixel");
+    }
+
+    /// Phase 2 (Plan 0013): `capture_preset` is a pure function of
+    /// `(name, frame, frames)`. Uses the stateful swarm preset "Drift" — the
+    /// case where a missing state reset would leak history — to prove two
+    /// captures are byte-identical, that N=1 differs from N=120 (the scene
+    /// animates), and that an unknown name is a clean error.
+    #[test]
+    fn capture_preset_is_deterministic_and_animates() {
+        let mut renderer = Renderer::new_headless(HeadlessOptions {
+            width: 128,
+            height: 128,
+            prefer_software: true,
+        })
+        .expect("headless renderer builds");
+        let frame = AnalysisFrame::default();
+
+        let a = renderer
+            .capture_preset("Drift", &frame, 120)
+            .expect("capture Drift @120");
+        let b = renderer
+            .capture_preset("Drift", &frame, 120)
+            .expect("recapture Drift @120");
+        assert_eq!(
+            a.rgba, b.rgba,
+            "same (preset, frame, N) is byte-identical across calls"
+        );
+
+        let one = renderer
+            .capture_preset("Drift", &frame, 1)
+            .expect("capture Drift @1");
+        assert_ne!(
+            one.rgba, a.rgba,
+            "N=1 differs from N=120 — the scene advances over time"
+        );
+
+        assert!(
+            renderer
+                .capture_preset("no-such-preset", &frame, 1)
+                .is_err(),
+            "an unknown preset name is a clean error, not a panic"
+        );
     }
 }

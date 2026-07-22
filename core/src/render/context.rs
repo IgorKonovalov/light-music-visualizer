@@ -34,6 +34,8 @@ pub enum RenderError {
     /// A headless capture failed to map or read back its offscreen buffer
     /// (Plan 0013 tooling path — never the live render path).
     CaptureReadback,
+    /// A capture requested a preset name not in the loaded roster (Plan 0013).
+    UnknownPreset(String),
 }
 
 impl std::fmt::Display for RenderError {
@@ -48,6 +50,9 @@ impl std::fmt::Display for RenderError {
             }
             RenderError::CaptureReadback => {
                 write!(f, "headless capture readback failed")
+            }
+            RenderError::UnknownPreset(name) => {
+                write!(f, "no preset named '{name}' in the roster")
             }
         }
     }
