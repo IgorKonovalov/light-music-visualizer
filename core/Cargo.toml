@@ -58,6 +58,14 @@ glyphon = { version = "=0.12.0", optional = true }
 # core test suite all compile glyphon out entirely.
 text = ["dep:glyphon"]
 
+# Dev-only image I/O for the headless-capture golden harness (ADR-0011): decode
+# committed baseline PNGs to compare against a fresh render. Dev-dependency scope
+# keeps it out of the shipped cdylib/staticlib entirely. Trimmed to just the PNG
+# codec (default features pull avif/exr/webp/rayon we never touch); pinned exact
+# per NFR 4 / the hygiene guard.
+[dev-dependencies]
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+
 # Per-OS wgpu backend (NFR 12). Only the shipped backend compiles: DX12 on
 # Windows, Metal on macOS. NFR 2 already fixes DX12 as the Windows baseline and
 # NFR does the same for Metal on macOS, so no supported machine loses rendering
