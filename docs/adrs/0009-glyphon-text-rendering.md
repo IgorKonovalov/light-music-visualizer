@@ -28,8 +28,8 @@ reuses it rather than a throwaway.
 ## Decision
 
 We will adopt **glyphon** (cosmic-text + swash on wgpu) as the standalone's text renderer,
-living in the core's render layer **behind a non-default cargo feature `overlay`**. The
-standalone enables `lmv-core = { path = "../core", features = ["overlay"] }`; the plugin's
+living in the core's render layer **behind a non-default cargo feature `text`**. The
+standalone enables `lmv-core = { path = "../core", features = ["text"] }`; the plugin's
 `cdylib`/`staticlib` build, the default `cargo build`, and the core test suite compile glyphon
 out entirely.
 
@@ -58,7 +58,7 @@ The C ABI is **untouched** — no version bump. The plugin gains nothing here, b
 - glyphon pulls a **sizable transitive tree** (cosmic-text, swash, ...) — a real hit to the
   standalone's binary size and to the exact-pin surface. It is the first dependency accepted
   primarily for UI polish rather than a core capability.
-- Feature-gating adds `#[cfg(feature = "overlay")]` seams to the render hot path (a second pass
+- Feature-gating adds `#[cfg(feature = "text")]` seams to the render hot path (a second pass
   in `render()`), so `core::render` has **two compiled shapes** to keep working — a small
   readability and build-matrix cost (the feature build must be exercised, not just the default).
 - glyphon↔wgpu **version lockstep** couples our wgpu upgrades to glyphon's release cadence; a
@@ -98,5 +98,9 @@ sensitive to size. The gate is cheap insurance against that.
 
 ## Notes
 
-Supersedes nothing. The `overlay` feature is the seam's on/off switch. Because the C ABI is
+Supersedes nothing. The `text` feature is the seam's on/off switch. It is named `text` (for the
+`render::text` seam), deliberately **not** `overlay`, to avoid colliding with the concurrent
+Plan 0011 / [ADR-0008](0008-c-abi-v3-diagnostics.md) diagnostics overlay (`render/overlay.rs`,
+the `LMV_DEBUG_OVERLAY` flag) — that overlay is always compiled, dependency-free, and paints in
+all three frontends, so it is emphatically *not* behind this feature. Because the C ABI is
 unchanged, `LMV_ABI_VERSION` stays at 2 and the plugin build is unaffected.

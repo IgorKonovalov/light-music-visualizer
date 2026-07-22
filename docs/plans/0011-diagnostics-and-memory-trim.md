@@ -260,7 +260,11 @@ int32_t lmv_get_metrics(LmvHandle *handle, LmvMetrics *out);  /* out caller-allo
   and must paint in the plugin too (all-three parity) without a new dependency (NFR §4). Accepted
   throwaway risk (the user chose graphs + minimal numeric readout knowing this). Keep the debug font
   self-contained so a later migration — only if glyphon ever becomes available in core/plugin builds —
-  is a single-file swap.
+  is a single-file swap. **Render-pass coordination:** both this plan's diagnostics overlay
+  (`render/overlay.rs`) and Plan 0008's `text` pass add a conditionally-skipped final pass to
+  `Renderer::render`; whichever lands second appends its pass (ordered, diagnostics on top) rather
+  than replacing the other's. Plan 0008's glyphon feature is named `text`, not `overlay`, so it does
+  not read as gating this always-compiled diagnostics overlay.
 - **`#[repr(C)]` struct drift.** A layout mismatch between the C++ `LmvMetrics` and the Rust struct is a
   silent memory bug, not a compile error (no cbindgen, per ADR-0003). Mitigation: the Phase 4 FFI test
   asserts `struct_size`/`abi_version`, and the header gets a `static_assert` on `sizeof(LmvMetrics)`.

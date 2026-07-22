@@ -1,6 +1,6 @@
 # 0008 — In-app preset browse overlay (standalone): on-canvas text + keyboard picker
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev
 > **Related ADRs:** [ADR-0009](../adrs/0009-glyphon-text-rendering.md) — adopt glyphon for
@@ -16,7 +16,7 @@ Plan 0007 made the preset library real and portable, but the only way to reach a
 the fact. This plan gives the standalone an **in-app browse overlay**: press a key, a scrollable
 list of preset names appears over the running visual, arrow keys move a highlight, typing
 narrows the list, Enter jumps straight to that preset, Esc closes. It needs the codebase's first
-**text rendering** — adopted as **glyphon** behind a core `overlay` cargo feature
+**text rendering** — adopted as **glyphon** behind a core `text` cargo feature
 ([ADR-0009](../adrs/0009-glyphon-text-rendering.md)), rendered through a small reusable
 `render::text` seam so Plan 0009's live-show HUD can later draw through the same path. First
 user-visible behavior lands in Phase 1: the standalone draws the **active preset's name on the
@@ -61,7 +61,7 @@ window-free `OverlayState`** in the standalone (open/closed, highlight, filter, 
 unit-tested independently, and wire `winit` key events into it; each frame while open it emits
 positioned text runs for the visible rows and, on Enter, calls `select_preset` with the
 highlighted preset's **absolute** index. glyphon is enabled only for the standalone
-(`features = ["overlay"]`); the plugin/default/core-test builds stay glyphon-free. We rejected a
+(`features = ["text"]`); the plugin/default/core-test builds stay glyphon-free. We rejected a
 bitmap atlas (blocky, chosen against), wgpu_text (no quality win), a standalone-owned GPU pass
 (layer inversion — core owns the pass), and an unconditional glyphon dep (bloats the plugin) —
 all recorded in ADR-0009.
@@ -70,7 +70,7 @@ all recorded in ADR-0009.
 
 ```mermaid
 flowchart TD
-    subgraph standalone [standalone/ — Rust, feature "overlay" on]
+    subgraph standalone [standalone/ — Rust, feature "text" on]
         keys[winit key events<br/>Tab / arrows / chars / Enter / Esc]
         ostate[OverlayState<br/>open? highlight, filter string<br/>pure, unit-tested]
         rows[visible rows -> TextRun list<br/>+ highlight]
@@ -101,21 +101,21 @@ plan at the end.
 
 - **Owner skill:** dev
 - **Area:** core (render), standalone
-- **What:** Add glyphon to `core` behind a **non-default `overlay` feature**
-  (`[features] overlay = ["dep:glyphon"]`, `glyphon` an optional exact-pinned dep), and add
+- **What:** Add glyphon to `core` behind a **non-default `text` feature**
+  (`[features] text = ["dep:glyphon"]`, `glyphon` an optional exact-pinned dep), and add
   `core/src/render/text.rs` (carrying the hot-path panic pragma — it lives under `render/`, so
   the hygiene guard already requires it) with a `TextLayer` wrapping glyphon's
   `FontSystem`/`SwashCache`/atlas/`TextRenderer`/`Viewport` and a `TextRun { text, x, y, size,
   color }`. Give `Renderer` a per-frame text queue and a `queue_text(&[TextRun])`-style entry;
   in `render()`, after `scene.render(...)`, if the feature is on and the queue is non-empty,
   prepare + draw the runs in a second `RenderPass` (load, not clear) into the same `view`, then
-  clear the queue. All glyphon-touching code sits under `#[cfg(feature = "overlay")]`; the
+  clear the queue. All glyphon-touching code sits under `#[cfg(feature = "text")]`; the
   default `render()` shape compiles unchanged. The standalone enables the feature and, each
   frame, queues the active preset name in a corner. glyphon is pinned to the release whose wgpu
   matches `=30.0.0` (verify at build — see Risks).
 - **Files touched:** `core/Cargo.toml` (optional dep + feature), `core/src/render/text.rs`
   (new), `core/src/render/mod.rs` (queue + second pass, cfg-gated), `standalone/Cargo.toml`
-  (`features = ["overlay"]`), `standalone/src/main.rs` (queue the active name each frame).
+  (`features = ["text"]`), `standalone/src/main.rs` (queue the active name each frame).
 - **Done when:** `cargo run -p standalone` draws the active preset's name legibly on the canvas
   over the running visual (survives cycling and resize). `cargo tree -p lmv-core` (default
   features) shows **no glyphon**; `cargo tree -p standalone` shows it — a review-verifiable
@@ -182,7 +182,7 @@ plan at the end.
   broader list; the match is case-insensitive substring. Runtime/visual (on-box): typing narrows
   the on-screen list live, and editing a preset file while the overlay is open refreshes the list
   within ~1 s. `cargo nextest run` and clippy `-D warnings` stay green (default and
-  `--features overlay` core builds both compile).
+  `--features text` core builds both compile).
 
 ## Data shapes
 
@@ -190,7 +190,7 @@ plan at the end.
 // illustrative — not the final interface
 
 // core::render::text — feature-gated seam, reused by the overlay and a later HUD.
-#[cfg(feature = "overlay")]
+#[cfg(feature = "text")]
 pub struct TextRun<'a> {
     pub text: &'a str,
     pub x: f32,
@@ -205,7 +205,7 @@ impl Renderer {
     /// returns the active preset name.
     pub fn select_preset(&mut self, index: usize) -> &str;
     /// Queue text runs to composite over the next rendered frame (cleared each
-    /// frame). No-op when the `overlay` feature is off.
+    /// frame). No-op when the `text` feature is off.
     pub fn queue_text(&mut self, runs: &[TextRun<'_>]);
 }
 
@@ -227,11 +227,11 @@ impl OverlayState {
   (its own ADR + a re-test of the whole render graph), **not** something to force here — stop and
   escalate at Phase 1 rather than bumping wgpu silently.
 - **Dependency-tree / binary-size growth** (ADR-0009 negative). Accepted, and confined to the
-  standalone by the `overlay` feature gate; measure the standalone binary before/after (NFR 4)
+  standalone by the `text` feature gate; measure the standalone binary before/after (NFR 4)
   and confirm glyphon is absent from the default/plugin dependency graph (`cargo tree`).
-- **Two build shapes for `core::render`.** The `#[cfg(feature = "overlay")]` second pass means
+- **Two build shapes for `core::render`.** The `#[cfg(feature = "text")]` second pass means
   `render()` compiles two ways; the feature build must be exercised, not just the default. `dev`
-  builds both locally this session; a `--features overlay` core check is a CI follow-up (note it
+  builds both locally this session; a `--features text` core check is a CI follow-up (note it
   at close, like the Miri/FFI CI gaps).
 - **Overlap with Plan 0009 (live features), also standalone-only.** Both edit
   `standalone/src/main.rs` input handling, and Plan 0009's HUD is the second consumer of this
@@ -243,7 +243,13 @@ impl OverlayState {
   can't have glyphon — it's feature-gated out here). This plan's glyphon path is the
   standalone-only, quality-first text for browse/HUD. They are intentionally separate stacks, not
   duplication: plugin parity (bitmap digits) vs standalone polish (glyphon). If the browse
-  overlay ever needs plugin parity, that is a re-decision, not a silent merge.
+  overlay ever needs plugin parity, that is a re-decision, not a silent merge. Two consequences
+  to keep straight: (1) this feature is named **`text`**, *not* `overlay`, so it does not read as
+  gating Plan 0011's always-compiled diagnostics overlay (`render/overlay.rs`, `LMV_DEBUG_OVERLAY`);
+  (2) both plans add a **conditionally-skipped final pass** to `Renderer::render` — Plan 0011's
+  diagnostics pass and this plan's `text` pass. Whichever lands second **composes** (appends its
+  pass after the scene, ordered) rather than replacing the other's; the diagnostics readout draws
+  on top of the browse overlay when both are on.
 - **Filter/selection index mapping.** The overlay must always `Select` the **absolute** roster
   index, not the filtered position — a unit test asserts this directly (Phase 4), since an
   off-by-one here silently selects the wrong preset.
@@ -271,7 +277,7 @@ impl OverlayState {
 
 - **Plan 0009 — live performance features** reuses `render::text` for an on-canvas HUD (preset
   name / system / FPS / live-show status), retiring the title-bar surface.
-- A `--features overlay` core build check in CI (the feature build's green is currently a local
+- A `--features text` core build check in CI (the feature build's green is currently a local
   gate only), alongside the standing FFI/Miri CI notes.
 - Mouse selection and/or preset metadata (tags, grouping, preview) if the flat keyboard list
   proves limiting once the library grows.
