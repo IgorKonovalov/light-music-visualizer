@@ -135,8 +135,8 @@ impl Scene for ParametricCurveScene {
         // match gains ignore-arms for them when they land.
         match cfg {
             GeneratorConfig::Curve { family } => self.family = *family,
-            // Generator configs (L-system, ...) belong to their own scenes.
-            GeneratorConfig::LSystem { .. } => {}
+            // Generator configs (L-system, star) belong to their own scenes.
+            GeneratorConfig::LSystem { .. } | GeneratorConfig::Star { .. } => {}
         }
     }
 

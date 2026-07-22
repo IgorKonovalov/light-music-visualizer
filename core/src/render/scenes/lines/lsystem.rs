@@ -24,7 +24,9 @@ use std::rc::Rc;
 
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
-use super::{GeneratorConfig, MAX_LSYSTEM_DEPTH, MAX_SEGMENTS, grammar, palette, turtle};
+use super::{
+    GeneratorConfig, MAX_LSYSTEM_DEPTH, MAX_SEGMENTS, grammar, palette, transform_cached, turtle,
+};
 use crate::dsp::AnalysisFrame;
 
 /// Maps `thickness` to an NDC-y half-width (see the parametric scene).
@@ -118,37 +120,6 @@ impl LSystemScene {
     }
 }
 
-/// Transform cached base geometry into `out`: rotate by `rotation` (radians),
-/// scale, colour, set `width`, and reveal a `progress` prefix (line-draw-on).
-/// Allocation-free into a preallocated `out` — the per-frame half of the scene.
-pub(super) fn transform_into(
-    base: &[SegmentInstance],
-    rotation: f32,
-    scale: f32,
-    color: [f32; 3],
-    width: f32,
-    progress: f32,
-    out: &mut Vec<SegmentInstance>,
-) {
-    out.clear();
-    let (sin, cos) = rotation.sin_cos();
-    let keep = ((base.len() as f32) * progress.clamp(0.0, 1.0)).round() as usize;
-    let rot = |p: [f32; 2]| -> [f32; 2] {
-        [
-            (p[0] * cos - p[1] * sin) * scale,
-            (p[0] * sin + p[1] * cos) * scale,
-        ]
-    };
-    for seg in base.iter().take(keep) {
-        out.push(SegmentInstance {
-            a: rot(seg.a),
-            b: rot(seg.b),
-            color,
-            width,
-        });
-    }
-}
-
 impl Scene for LSystemScene {
     fn name(&self) -> &'static str {
         "l-system"
@@ -192,7 +163,7 @@ impl Scene for LSystemScene {
                 max_depth,
                 seed: _,
             } => self.build(axiom, rules, *angle_deg, *max_depth),
-            GeneratorConfig::Curve { .. } => {}
+            GeneratorConfig::Curve { .. } | GeneratorConfig::Star { .. } => {}
         }
     }
 
@@ -217,7 +188,7 @@ impl Scene for LSystemScene {
             pal[2] * self.brightness,
         ];
         let width = (self.thickness * WIDTH_SCALE).max(0.0005);
-        transform_into(
+        transform_cached(
             base,
             self.rotation,
             self.scale,
@@ -260,7 +231,7 @@ mod tests {
         let cap = out.capacity();
         for frame in 0..16 {
             let rotation = frame as f32 * 0.05;
-            transform_into(&base, rotation, 1.0, [0.5; 3], 0.01, 1.0, &mut out);
+            transform_cached(&base, rotation, 1.0, [0.5; 3], 0.01, 1.0, &mut out);
         }
         assert_eq!(out.capacity(), cap, "per-frame transform reused the buffer");
         assert_eq!(out.len(), base.len(), "full progress draws every segment");
@@ -271,7 +242,7 @@ mod tests {
         let mut base = Vec::with_capacity(64);
         turtle::walk("FFFFFFFF", 0.0, MAX_SEGMENTS, &mut base);
         let mut out = Vec::with_capacity(64);
-        transform_into(&base, 0.0, 1.0, [1.0; 3], 0.01, 0.5, &mut out);
+        transform_cached(&base, 0.0, 1.0, [1.0; 3], 0.01, 0.5, &mut out);
         assert_eq!(out.len(), 4, "half of eight segments");
     }
 }

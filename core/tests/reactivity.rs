@@ -26,6 +26,7 @@ fn system_name(system: SystemKind) -> &'static str {
         SystemKind::Swarm => "swarm",
         SystemKind::ParametricCurve => "parametric_curve",
         SystemKind::LSystem => "lsystem",
+        SystemKind::StarPattern => "star_pattern",
     }
 }
 

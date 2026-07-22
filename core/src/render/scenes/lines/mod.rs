@@ -23,14 +23,17 @@
 
 pub mod curves;
 pub mod grammar;
+pub mod hankin;
 pub mod lsystem;
 pub mod parametric;
 pub mod renderer;
+pub mod star;
 pub mod turtle;
 
 pub use lsystem::LSystemScene;
 pub use parametric::ParametricCurveScene;
 pub use renderer::{LineRenderer, SegmentInstance};
+pub use star::StarPatternScene;
 
 /// Fixed segment-buffer capacity for every line scene, tuned to the iGPU floor
 /// (ADR-0007 Risks: ~20k). A curve's `samples` and a generator's structure are
@@ -89,6 +92,14 @@ pub enum GeneratorConfig {
         /// Reserved seed for future stochastic rules; deterministic today.
         seed: u64,
     },
+    /// A Hankin star pattern: an `n`-fold star rosette built at load, with a few
+    /// contact-angle variants a beat can switch between.
+    Star {
+        /// Star order `n` (from the tiling), e.g. 6 or 12.
+        order: u32,
+        /// Contact angle in degrees; variants are precomputed around it.
+        contact_angle_deg: f32,
+    },
 }
 
 /// iq-style cosine palette (RGB phase-shifted), matching the swarm/fragment
@@ -100,4 +111,37 @@ pub fn palette(t: f32) -> [f32; 3] {
         0.5 + 0.5 * (tau * (t + 0.42)).cos(),
         0.5 + 0.5 * (tau * (t + 0.62)).cos(),
     ]
+}
+
+/// The per-frame half shared by every **generator** line scene (L-system,
+/// star): transform cached base geometry into `out` — rotate by `rotation`
+/// (radians), scale, colour, set `width`, and reveal a `progress` prefix
+/// (line-draw-on). Allocation-free into a preallocated `out`; expansion /
+/// construction lives at load, this is the only per-frame work.
+pub(crate) fn transform_cached(
+    base: &[SegmentInstance],
+    rotation: f32,
+    scale: f32,
+    color: [f32; 3],
+    width: f32,
+    progress: f32,
+    out: &mut Vec<SegmentInstance>,
+) {
+    out.clear();
+    let (sin, cos) = rotation.sin_cos();
+    let keep = ((base.len() as f32) * progress.clamp(0.0, 1.0)).round() as usize;
+    let rot = |p: [f32; 2]| -> [f32; 2] {
+        [
+            (p[0] * cos - p[1] * sin) * scale,
+            (p[0] * sin + p[1] * cos) * scale,
+        ]
+    };
+    for seg in base.iter().take(keep) {
+        out.push(SegmentInstance {
+            a: rot(seg.a),
+            b: rot(seg.b),
+            color,
+            width,
+        });
+    }
 }

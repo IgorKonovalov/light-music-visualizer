@@ -72,6 +72,7 @@ fn report_family_distinctness() {
         (SystemKind::Swarm, "swarm"),
         (SystemKind::ParametricCurve, "parametric_curve"),
         (SystemKind::LSystem, "lsystem"),
+        (SystemKind::StarPattern, "star_pattern"),
     ] {
         let names: Vec<String> = default_presets()
             .into_iter()

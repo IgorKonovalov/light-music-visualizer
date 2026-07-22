@@ -85,6 +85,7 @@ pub(crate) fn create_all(
         Box::new(swarm::SwarmScene::new(device, surface_format)),
         Box::new(lines::ParametricCurveScene::new(line_renderer.clone())),
         Box::new(lines::LSystemScene::new(line_renderer.clone())),
+        Box::new(lines::StarPatternScene::new(line_renderer.clone())),
     ]
 }
 

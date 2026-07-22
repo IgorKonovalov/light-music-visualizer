@@ -195,6 +195,18 @@ fn bad_presets_are_rejected() {
         Preset::from_toml_str(bad_curve).is_err(),
         "an unknown curve family must be rejected"
     );
+    // A star_pattern with an unknown tiling is likewise a clean load error.
+    let bad_star =
+        "system = \"star_pattern\"\n[generator]\ntiling = \"heptagon\"\ncontact_angle_deg = 30\n";
+    assert!(
+        Preset::from_toml_str(bad_star).is_err(),
+        "an unknown star tiling must be rejected"
+    );
+    // A generator preset missing its [generator] table is rejected, not panicked.
+    assert!(
+        Preset::from_toml_str("system = \"lsystem\"").is_err(),
+        "an lsystem with no [generator] table must be rejected"
+    );
 }
 
 #[test]
@@ -230,7 +242,7 @@ fn embedded_default_presets_all_parse() {
     let presets = lmv_core::preset::default_presets();
     assert_eq!(
         presets.len(),
-        16,
+        17,
         "all shipped curated presets should compile"
     );
     assert!(

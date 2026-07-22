@@ -1,0 +1,18 @@
+# Star Rosette - a 12-fold Hankin star that turns slowly, breathes on the clock,
+# and snaps between a pointy and a blunt variant on the beat. Bass thickens the
+# strokes; treble sweeps the hue.
+system = "star_pattern"
+name   = "Star Rosette"
+
+[generator]
+tiling            = "12"
+contact_angle_deg = 35
+
+[params]
+variant       = "floor(2.99 * beat)"
+rotation      = "0.3 * time"
+hue           = "0.5 + time * 0.03 + treb * 0.3"
+draw_progress = "clamp(0.6 + bar * 0.6, 0, 1)"
+thickness     = "4 + bass * 2"
+scale         = "0.92 + bass * 0.14"
+brightness    = "0.5 + 0.5 * sin(time * 4) + clamp(mid * 0.4, 0, 0.4)"

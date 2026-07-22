@@ -56,6 +56,7 @@ fn system_slot(system: SystemKind) -> usize {
         SystemKind::Swarm => 1,
         SystemKind::ParametricCurve => 2,
         SystemKind::LSystem => 3,
+        SystemKind::StarPattern => 4,
     }
 }
 

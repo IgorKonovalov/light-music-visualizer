@@ -13,7 +13,7 @@ use std::fmt;
 use serde::Deserialize;
 
 use super::expr::{self, Expr, ExprError};
-use crate::render::scenes::lines::{CurveFamily, GeneratorConfig, MAX_LSYSTEM_DEPTH};
+use crate::render::scenes::lines::{CurveFamily, GeneratorConfig, MAX_LSYSTEM_DEPTH, hankin};
 
 /// The built-in system a preset drives. Extend as Plan 0003 (and later plans)
 /// add systems; unknown names are rejected at load.
@@ -27,6 +27,8 @@ pub enum SystemKind {
     ParametricCurve,
     /// The L-system generator scene — ADR-0007.
     LSystem,
+    /// The Hankin star-pattern generator scene — ADR-0007.
+    StarPattern,
 }
 
 impl SystemKind {
@@ -36,6 +38,7 @@ impl SystemKind {
             "swarm" => SystemKind::Swarm,
             "parametric_curve" => SystemKind::ParametricCurve,
             "lsystem" => SystemKind::LSystem,
+            "star_pattern" => SystemKind::StarPattern,
             _ => return None,
         })
     }
@@ -116,6 +119,12 @@ fn build_config(
             })?;
             Ok(Some(g.into_lsystem()?))
         }
+        SystemKind::StarPattern => {
+            let g = generator.ok_or_else(|| {
+                PresetError::Config("star_pattern requires a [generator] table".into())
+            })?;
+            Ok(Some(g.into_star()?))
+        }
         SystemKind::FragmentField | SystemKind::Swarm => Ok(None),
     }
 }
@@ -176,6 +185,12 @@ struct RawGenerator {
     /// L-system: reserved seed (deterministic today).
     #[serde(default)]
     seed: Option<u64>,
+    /// Star pattern: the regular tiling (e.g. `"6.6.6"` / `"hexagon"` / `"12"`).
+    #[serde(default)]
+    tiling: Option<String>,
+    /// Star pattern: contact angle in degrees.
+    #[serde(default)]
+    contact_angle_deg: Option<f32>,
 }
 
 impl RawGenerator {
@@ -224,6 +239,28 @@ impl RawGenerator {
             angle_deg,
             max_depth,
             seed: self.seed.unwrap_or(0),
+        })
+    }
+
+    /// Validate the table as a star-pattern config: a known regular tiling and a
+    /// finite contact angle. Every failure is a surfaced load error (ADR-0007).
+    fn into_star(self) -> Result<GeneratorConfig, PresetError> {
+        let tiling = self
+            .tiling
+            .ok_or_else(|| PresetError::Config("star_pattern needs a tiling".into()))?;
+        let order = hankin::tiling_order(&tiling)
+            .ok_or_else(|| PresetError::Config(format!("unknown tiling '{tiling}'")))?;
+
+        let contact_angle_deg = self.contact_angle_deg.unwrap_or(30.0);
+        if !contact_angle_deg.is_finite() {
+            return Err(PresetError::Config(
+                "star_pattern contact_angle_deg must be finite".into(),
+            ));
+        }
+
+        Ok(GeneratorConfig::Star {
+            order,
+            contact_angle_deg,
         })
     }
 }
