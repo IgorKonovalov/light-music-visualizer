@@ -105,24 +105,41 @@ All four are v1 requirements, delivered as their own plan after the Plan 0001 MV
 - Always-on-top / mini mode.
 - Settings persistence (last scene, window size/position/mode, quality tier — small config file).
 
-## 12. Runtime memory (added 2026-07-21, from the Plan 0001 close review)
+## 12. Runtime memory (added 2026-07-21; retargeted 2026-07-22 per [ADR-0010](adrs/0010-accept-gpu-driver-memory-floor.md))
 
-"Lightweight" (NFR §4) capped *binary* size but said nothing about *working set*. The Plan 0001
-standalone measured **~200 MB** resident during normal rendering, which is out of keeping with
-the goal on the iGPU baseline (§2).
+"Lightweight" (NFR §4) caps *binary* size but not *working set*. The original §12 target — "well under
+~100 MB", to be hit primarily by compiling wgpu with only the per-OS backend — was **measured and
+disproved** by Plan 0011 (Phase 6 landed the backend-trim; Phase 7 measured it). On the reference AMD
+iGPU box, release build, the standalone sits at **~300 MB working set / 343 MB private commit** — the
+trim took effect (verified DX12-only, no Vulkan/GL mapped) but footprint is dominated by the **DX12
+driver stack's private heap** (`amdxc64.dll` + `d3dcompiler_47` + `D3D12Core` …), not by wgpu's
+compiled backend code (mapped DLL code is only ~135 MB, and shared). The <100 MB absolute is not
+reachable on a DX12/wgpu app; the backend-trim is retired as a *memory* lever (it stays as a binary-size
+win under §4). See ADR-0010 for the decision and rejected alternatives.
 
-- **Target: standalone steady-state working set well under ~100 MB** at 1080p on the baseline
-  hardware, idle or rendering. Rough target, tuned when the reduction work lands — the point is
-  a large reduction from ~200 MB, not a precise number.
-- **Our own state is already small** (<~1 MB: ring buffer ~340 ms of f32, fixed DSP buffers,
-  a few uniform buffers). The footprint is almost entirely the GPU stack.
-- **Primary lever:** compile wgpu with only the per-OS backend feature — DX12 on Windows, Metal
-  on macOS. The current build carries the Vulkan/GL paths as well, which is dead weight on the
-  shipped target.
-- **Secondary levers:** swapchain frame-latency / buffer count, and avoiding redundant device
-  resources across scenes.
-- **Measurement, not vibes:** the reduction work states before/after resident set on the
-  baseline box as its done-when; the backend-trim must not regress the §1 performance floor.
+Retargeted requirements — chosen to be enforceable by the Plan 0011 diagnostics harness
+(`diagnostics.log`, `lmv_get_metrics`):
 
-This is a follow-up plan's work, slotted into the roadmap in `docs/plans/README.md`; it is not a
-Plan 0001 blocker.
+- **No session growth (the requirement that matters).** Working set / private commit stays flat over a
+  session — no monotonic growth across the §10 ≥4-hour soak. A leak is the real live-show failure; the
+  harness is the instrument. This is the hard requirement.
+- **State the cost of what we add.** The GPU driver stack is a fixed, vendor-dependent floor we do not
+  own; the actionable lever is **our** additions — render-pipeline / shader / resource count. A new
+  built-in system states its working-set delta on the reference box (harness-measured), so growth is a
+  recorded choice, not a surprise. (Footprint rose from ~200 MB to ~300 MB across Plans 0003/0010/0011,
+  most plausibly from added pipelines — exactly this cost, previously untracked.)
+- **Soft ceiling, for regressions only:** ~350 MB working set on the reference AMD iGPU box with the
+  current built-in system set. A single-machine, vendor-dependent tripwire to catch a regression — not
+  a portable absolute (a different GPU/driver has a different floor).
+- **Our own Rust state stays <~1 MB** (ring buffer ~340 ms of f32, fixed DSP buffers, a few uniform
+  buffers) — unchanged; the target was never our allocations.
+- **Open (optional dev spike):** isolate the bare wgpu/DX12 driver floor (a scene-less window measured
+  on the same box) to split the fixed floor from our overhead and put a hard number on the per-system
+  budget. Refines the points above; does not change ADR-0010.
+
+Measurement method (repeatable): PowerShell `Get-Process lmv` → `WorkingSet64` vs `PrivateMemorySize64`,
+`.Modules` by mapped size, and which backend loader DLLs are mapped. The private-vs-working-set split is
+what proved the cost is driver heap, not our code.
+
+Not a Plan 0001 blocker; the leak-guard folds into the §10 live-features soak, the per-system delta into
+each scene-adding plan.
