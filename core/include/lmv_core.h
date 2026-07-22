@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define LMV_ABI_VERSION 2u
+#define LMV_ABI_VERSION 3u
 
 /* Result codes (0 success, negative failure). */
 #define LMV_OK 0
@@ -39,8 +39,40 @@ extern "C" {
 #define LMV_ERR_PANIC (-5)
 #define LMV_ERR_UNSUPPORTED (-6)
 
+/* Debug flags for lmv_set_debug (ADR-0008). Higher bits reserved, ignored. */
+#define LMV_DEBUG_OFF 0u
+#define LMV_DEBUG_OVERLAY (1u << 0) /* draw the on-screen diagnostics overlay */
+
 /* Opaque visualizer instance. */
 typedef struct LmvHandle LmvHandle;
+
+/*
+ * Diagnostics snapshot filled by lmv_get_metrics (ADR-0008). Plain data,
+ * caller-allocated - no allocation crosses the ABI. Leads with struct_size +
+ * abi_version so later fields append without a version bump: the caller sets
+ * struct_size = sizeof(LmvMetrics), the core writes at most that many bytes and
+ * stamps what it wrote. Process RSS is deliberately NOT here (host-process
+ * owned; each shell reads its own). Layout mirrors the Rust #[repr(C)] struct in
+ * core/src/ffi.rs - keep the two in lockstep. Added in ABI v3.
+ */
+typedef struct LmvMetrics {
+    uint32_t struct_size;   /* caller sets sizeof; core stamps what it wrote */
+    uint32_t abi_version;   /* == lmv_abi_version() */
+    float fps;
+    float frame_ms_avg;
+    float frame_ms_p99;
+    uint64_t frames_total;
+    uint64_t frames_dropped;
+    uint64_t gpu_bytes;     /* core-tracked GPU bytes (approx; no device mem) */
+    uint32_t draw_calls;    /* last frame */
+    uint32_t reserved;      /* always 0 */
+} LmvMetrics;
+
+#ifdef __cplusplus
+/* A layout mismatch with the Rust struct is a silent memory bug, not a compile
+ * error (no cbindgen, per ADR-0003); guard it where the C++ shim compiles. */
+static_assert(sizeof(LmvMetrics) == 56, "LmvMetrics layout must match core/src/ffi.rs");
+#endif
 
 /* Runtime ABI version of the linked core; compare with LMV_ABI_VERSION. */
 uint32_t lmv_abi_version(void);
@@ -90,6 +122,23 @@ int32_t lmv_cycle_scene(LmvHandle *handle);
  */
 int32_t lmv_load_presets(LmvHandle *handle, const uint8_t *path_utf8,
                          size_t path_len);
+
+/*
+ * Set the debug flag set on the handle (LMV_DEBUG_*). Idempotent and cheap;
+ * callable at any time from the render-thread role, including before a window is
+ * attached (the flags apply when the renderer is created). LMV_DEBUG_OVERLAY at
+ * create time can also be seeded from the LMV_DEBUG_OVERLAY environment
+ * variable. Added in ABI v3.
+ */
+int32_t lmv_set_debug(LmvHandle *handle, uint32_t flags);
+
+/*
+ * Fill *out (caller-allocated) with the current diagnostics snapshot. Set
+ * out->struct_size = sizeof(LmvMetrics) before calling. Returns LMV_OK, or
+ * LMV_ERR_INVALID_ARG on a null handle/out. No allocation crosses the ABI; safe
+ * to poll every frame or once a second. Added in ABI v3.
+ */
+int32_t lmv_get_metrics(LmvHandle *handle, LmvMetrics *out);
 
 #ifdef __cplusplus
 } /* extern "C" */

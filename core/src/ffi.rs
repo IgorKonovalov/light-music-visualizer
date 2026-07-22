@@ -38,8 +38,9 @@ use crate::preset::{self, Preset};
 use crate::render::Renderer;
 
 /// Bump on any ABI shape change (with the accompanying ADR). v2 added
-/// `lmv_load_presets` (ADR-0006).
-pub const LMV_ABI_VERSION: u32 = 2;
+/// `lmv_load_presets` (ADR-0006); v3 added `lmv_set_debug` + `lmv_get_metrics`
+/// and the `LmvMetrics` struct (ADR-0008).
+pub const LMV_ABI_VERSION: u32 = 3;
 
 /// Call succeeded.
 pub const LMV_OK: i32 = 0;
@@ -56,8 +57,65 @@ pub const LMV_ERR_PANIC: i32 = -5;
 /// The operation is unsupported on this platform.
 pub const LMV_ERR_UNSUPPORTED: i32 = -6;
 
+/// Debug flags (ADR-0008). No flags — a clean scene, metrics still collected.
+pub const LMV_DEBUG_OFF: u32 = 0;
+/// Draw the on-screen diagnostics overlay. Higher bits are reserved, ignored.
+pub const LMV_DEBUG_OVERLAY: u32 = 1 << 0;
+
+/// Environment variable read once at [`lmv_create`] to seed the default debug
+/// flags (a boundary read). Any of `1`/`true`/`on`/`yes` (case-insensitive)
+/// turns the overlay on at boot; a host can still flip it live via
+/// [`lmv_set_debug`].
+const DEBUG_OVERLAY_ENV: &str = "LMV_DEBUG_OVERLAY";
+
+/// The diagnostics snapshot the host reads over the ABI (ADR-0008). Plain data,
+/// caller-allocated — no allocation crosses the boundary. Leads with
+/// `struct_size` + `abi_version` so later fields append without a v4 bump
+/// (forward-extensible by size). Layout mirrors `core/include/lmv_core.h`;
+/// process RSS is deliberately NOT here (host-process-owned).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct LmvMetrics {
+    /// Caller sets `sizeof`; core stamps the byte count it actually wrote.
+    pub struct_size: u32,
+    /// Equals [`lmv_abi_version`].
+    pub abi_version: u32,
+    /// Frames per second over the rolling window.
+    pub fps: f32,
+    /// Mean frame time (ms).
+    pub frame_ms_avg: f32,
+    /// 99th-percentile frame time (ms).
+    pub frame_ms_p99: f32,
+    /// Frames recorded since creation.
+    pub frames_total: u64,
+    /// Frames the renderer skipped.
+    pub frames_dropped: u64,
+    /// Core-tracked GPU resource bytes (approximate; wgpu exposes no device mem).
+    pub gpu_bytes: u64,
+    /// Draw calls on the last frame.
+    pub draw_calls: u32,
+    /// Reserved, always 0.
+    pub reserved: u32,
+}
+
 /// Same headroom as the standalone capture path (~340 ms @ 48 kHz).
 const RING_CAPACITY_FRAMES: usize = 16_384;
+
+/// Read the `LMV_DEBUG_OVERLAY` env var once and map a truthy value to the
+/// overlay flag (a boundary read at create time).
+fn debug_flags_from_env() -> u32 {
+    match std::env::var(DEBUG_OVERLAY_ENV) {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            if matches!(v.as_str(), "1" | "true" | "on" | "yes") {
+                LMV_DEBUG_OVERLAY
+            } else {
+                LMV_DEBUG_OFF
+            }
+        }
+        Err(_) => LMV_DEBUG_OFF,
+    }
+}
 
 struct RenderState {
     consumer: SampleConsumer,
@@ -68,6 +126,10 @@ struct RenderState {
     /// installed on the renderer as soon as `lmv_attach_window` creates it.
     /// Empty once installed (or if load always followed attach).
     pending_presets: Vec<Preset>,
+    /// Debug flags (ADR-0008), seeded from the env at create and updatable via
+    /// `lmv_set_debug`. Held here so a set-before-attach persists, then applied
+    /// to the renderer when `lmv_attach_window` creates it.
+    debug_flags: u32,
 }
 
 /// Opaque to C. The two `UnsafeCell`s implement the documented two-thread
@@ -108,6 +170,7 @@ pub extern "C" fn lmv_create(sample_rate: u32, channels: u16) -> *mut LmvHandle 
                 renderer: None,
                 scratch: vec![0.0; 32_768],
                 pending_presets: Vec::new(),
+                debug_flags: debug_flags_from_env(),
             }),
         }))
     })
@@ -192,6 +255,10 @@ pub unsafe extern "C" fn lmv_attach_window(
                     if !state.pending_presets.is_empty() {
                         renderer.set_presets(std::mem::take(&mut state.pending_presets));
                     }
+                    // Always collect metrics (so the host can poll its log); the
+                    // overlay follows the seeded/updated debug flags (ADR-0008).
+                    renderer.enable_diagnostics(true);
+                    renderer.set_overlay(state.debug_flags & LMV_DEBUG_OVERLAY != 0);
                     state.renderer = Some(renderer);
                     LMV_OK
                 }
@@ -326,6 +393,86 @@ pub unsafe extern "C" fn lmv_load_presets(
             None => state.pending_presets = report.presets,
         }
         count
+    }))
+    .unwrap_or(LMV_ERR_PANIC)
+}
+
+/// Set the debug flag set on the handle (`LMV_DEBUG_*`; higher bits reserved and
+/// ignored). Idempotent and cheap — callable from the render-thread role at any
+/// time, including before a window is attached (the flags are applied when the
+/// renderer is created). Added in ABI v3 (ADR-0008).
+///
+/// # Safety
+/// `handle` valid per `lmv_create`; render-thread role only.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lmv_set_debug(handle: *mut LmvHandle, flags: u32) -> i32 {
+    if handle.is_null() {
+        return LMV_ERR_INVALID_ARG;
+    }
+    let handle = unsafe { &*handle };
+    catch_unwind(AssertUnwindSafe(|| {
+        let state = unsafe { &mut *handle.render.get() };
+        state.debug_flags = flags;
+        if let Some(renderer) = state.renderer.as_mut() {
+            renderer.set_overlay(flags & LMV_DEBUG_OVERLAY != 0);
+        }
+        LMV_OK
+    }))
+    .unwrap_or(LMV_ERR_PANIC)
+}
+
+/// Fill `out` (caller-allocated) with the current diagnostics snapshot. The
+/// caller sets `out->struct_size = sizeof(LmvMetrics)` first; the core writes at
+/// most that many bytes and stamps the `struct_size`/`abi_version` it wrote, so
+/// an older host reading a newer core still reads its prefix safely. No
+/// allocation crosses the boundary. Returns `LMV_OK`, or `LMV_ERR_INVALID_ARG`
+/// on a null handle/out. Added in ABI v3 (ADR-0008).
+///
+/// # Safety
+/// `handle` valid per `lmv_create`; `out` points at a caller-allocated
+/// `LmvMetrics` whose `struct_size` field is initialized. Render-thread role only.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lmv_get_metrics(handle: *mut LmvHandle, out: *mut LmvMetrics) -> i32 {
+    if handle.is_null() || out.is_null() {
+        return LMV_ERR_INVALID_ARG;
+    }
+    let handle = unsafe { &*handle };
+    catch_unwind(AssertUnwindSafe(|| {
+        let state = unsafe { &mut *handle.render.get() };
+        // Core-only values; zeros (a valid, versioned snapshot) before a window
+        // exists, since the metrics live on the renderer.
+        let m = state
+            .renderer
+            .as_ref()
+            .map(|r| r.metrics())
+            .unwrap_or_default();
+
+        let full = std::mem::size_of::<LmvMetrics>() as u32;
+        // Honor the caller's declared buffer size for forward compatibility.
+        let caller = unsafe { (*out).struct_size };
+        let n = if caller == 0 { full } else { caller.min(full) };
+
+        let local = LmvMetrics {
+            struct_size: n,
+            abi_version: LMV_ABI_VERSION,
+            fps: m.fps,
+            frame_ms_avg: m.frame_ms_avg,
+            frame_ms_p99: m.frame_ms_p99,
+            frames_total: m.frames_total,
+            frames_dropped: m.frames_dropped,
+            gpu_bytes: m.gpu_bytes,
+            draw_calls: m.draw_calls,
+            reserved: 0,
+        };
+        // Write only the first `n` bytes the caller has room for.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                std::ptr::from_ref(&local).cast::<u8>(),
+                out.cast::<u8>(),
+                n as usize,
+            );
+        }
+        LMV_OK
     }))
     .unwrap_or(LMV_ERR_PANIC)
 }
