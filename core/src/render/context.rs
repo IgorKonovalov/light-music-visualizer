@@ -13,6 +13,10 @@
 
 use wgpu::{CreateSurfaceError, RequestAdapterError, RequestDeviceError, SurfaceTarget};
 
+/// Offscreen texture format for the headless capture path (Plan 0013). A tight
+/// 8-bit RGBA the readback strips straight into a [`crate::render::CaptureImage`].
+pub(crate) const HEADLESS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
 /// Something went wrong bringing up or drawing with the GPU context.
 #[derive(Debug)]
 pub enum RenderError {
@@ -27,6 +31,9 @@ pub enum RenderError {
     /// Acquiring the frame raised a validation error — a bug, not a
     /// recoverable surface state.
     SurfaceValidation,
+    /// A headless capture failed to map or read back its offscreen buffer
+    /// (Plan 0013 tooling path — never the live render path).
+    CaptureReadback,
 }
 
 impl std::fmt::Display for RenderError {
@@ -39,6 +46,9 @@ impl std::fmt::Display for RenderError {
             RenderError::SurfaceValidation => {
                 write!(f, "surface texture acquisition failed validation")
             }
+            RenderError::CaptureReadback => {
+                write!(f, "headless capture readback failed")
+            }
         }
     }
 }
@@ -46,8 +56,13 @@ impl std::fmt::Display for RenderError {
 impl std::error::Error for RenderError {}
 
 /// Owns the wgpu instance, surface, device, and queue for one output window.
+///
+/// `surface` is `None` for a **headless** context (Plan 0013): a device+queue
+/// with no swapchain, drawing into offscreen capture textures. The on-surface
+/// present path always has `Some`; `config` still carries the render size and
+/// format for both paths.
 pub struct RenderContext {
-    pub(crate) surface: wgpu::Surface<'static>,
+    pub(crate) surface: Option<wgpu::Surface<'static>>,
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
     pub(crate) config: wgpu::SurfaceConfiguration,
@@ -114,7 +129,52 @@ impl RenderContext {
         surface.configure(&device, &config);
 
         Ok(Self {
-            surface,
+            surface: Some(surface),
+            device,
+            queue,
+            config,
+        })
+    }
+
+    /// Build a surface-less context for headless capture (Plan 0013): a device
+    /// and queue with no swapchain, drawing into offscreen textures. No window,
+    /// no present, no added dependency. `prefer_software` forces a fallback
+    /// adapter (WARP on DX12) so tests rasterize identically on any machine.
+    ///
+    /// The synthesized [`wgpu::SurfaceConfiguration`] carries only the render
+    /// size and the offscreen format ([`HEADLESS_FORMAT`]); its present-related
+    /// fields are inert with no surface to configure.
+    pub fn new_headless(
+        width: u32,
+        height: u32,
+        prefer_software: bool,
+    ) -> Result<Self, RenderError> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            force_fallback_adapter: prefer_software,
+            ..Default::default()
+        }))
+        .map_err(RenderError::RequestAdapter)?;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("lmv-headless-device"),
+            ..Default::default()
+        }))
+        .map_err(RenderError::RequestDevice)?;
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: HEADLESS_FORMAT,
+            color_space: wgpu::SurfaceColorSpace::Auto,
+            width: width.max(1),
+            height: height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+        };
+
+        Ok(Self {
+            surface: None,
             device,
             queue,
             config,
@@ -128,7 +188,9 @@ impl RenderContext {
         }
         self.config.width = width;
         self.config.height = height;
-        self.surface.configure(&self.device, &self.config);
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.device, &self.config);
+        }
     }
 
     /// The texture format the surface is configured with.
@@ -137,7 +199,10 @@ impl RenderContext {
     }
 
     /// Re-apply the current configuration (after a Lost/Outdated surface).
+    /// A no-op on a headless context (no surface to reconfigure).
     pub(crate) fn reconfigure(&self) {
-        self.surface.configure(&self.device, &self.config);
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.device, &self.config);
+        }
     }
 }

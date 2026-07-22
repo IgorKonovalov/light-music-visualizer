@@ -1,6 +1,6 @@
 # 0013 — Headless scene capture + differential visual QA (reactivity, distinctness, sanity, animation, beat) + golden images + shot CLI
 
-> **Status:** approved
+> **Status:** in-progress
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev, human
 > **Related ADRs:** [0011](../adrs/0011-image-crate-for-capture-tooling.md) (the `image`

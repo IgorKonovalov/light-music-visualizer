@@ -17,6 +17,7 @@
     clippy::unreachable
 )]
 
+pub mod capture;
 pub mod context;
 pub mod overlay;
 mod overlay_font;
@@ -27,6 +28,7 @@ pub mod text;
 use crate::diag::{Diag, Metrics};
 use crate::dsp::AnalysisFrame;
 use crate::preset::{Preset, SystemKind, Variables};
+pub use capture::CaptureImage;
 pub use context::{RenderContext, RenderError};
 use overlay::Overlay;
 use scenes::Scene;
@@ -114,6 +116,18 @@ impl Roster {
     }
 }
 
+/// How to build a headless [`Renderer`] for capture (Plan 0013).
+#[derive(Debug, Clone, Copy)]
+pub struct HeadlessOptions {
+    /// Offscreen render width in pixels.
+    pub width: u32,
+    /// Offscreen render height in pixels.
+    pub height: u32,
+    /// Force a fallback (software) adapter — WARP on DX12 — so captures
+    /// rasterize identically across machines. Tests want this on.
+    pub prefer_software: bool,
+}
+
 /// Owns the GPU context, the built-in systems, and the loaded presets; renders
 /// one frame per call by evaluating the active preset into the active system.
 pub struct Renderer {
@@ -143,6 +157,28 @@ impl Renderer {
         height: u32,
     ) -> Result<Self, RenderError> {
         let ctx = RenderContext::new(target, width, height)?;
+        let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
+        let overlay = Overlay::new(&ctx.device, ctx.surface_format());
+        #[cfg(feature = "text")]
+        let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
+        Ok(Self {
+            ctx,
+            scenes,
+            roster: Roster::new(crate::preset::default_presets()),
+            time: 0.0,
+            diag: Diag::new(),
+            overlay,
+            #[cfg(feature = "text")]
+            text_layer,
+        })
+    }
+
+    /// Build a **headless** renderer that draws into offscreen textures instead
+    /// of a window (Plan 0013 capture tooling). Same scenes, presets, and
+    /// per-frame evaluation as the on-surface path — only the target differs.
+    /// Starts with the embedded default presets.
+    pub fn new_headless(opts: HeadlessOptions) -> Result<Self, RenderError> {
+        let ctx = RenderContext::new_headless(opts.width, opts.height, opts.prefer_software)?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
@@ -283,6 +319,60 @@ impl Renderer {
     pub fn render(&mut self, frame: &AnalysisFrame) -> Result<(), RenderError> {
         self.time += scenes::SCENE_DT;
 
+        // Core-tracked GPU footprint: the swapchain dominates what the core
+        // allocates. An approximation (ADR-0008), refreshed each frame so it
+        // tracks resizes and Phase 6's swapchain trim.
+        self.diag.set_gpu_bytes(
+            self.ctx.config.width as u64
+                * self.ctx.config.height as u64
+                * SWAPCHAIN_BYTES_PER_PIXEL
+                * SWAPCHAIN_IMAGE_COUNT,
+        );
+
+        let Some(surface_tex) = Self::acquire(&self.ctx)? else {
+            self.diag.record_dropped(); // transient (timeout/occluded) — skip
+            return Ok(());
+        };
+        let view = surface_tex
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("lmv-frame"),
+            });
+
+        let (width, height) = (self.ctx.config.width, self.ctx.config.height);
+        let draw_calls = self.draw_frame(frame, &mut encoder, &view, width, height);
+
+        self.ctx.queue.submit(std::iter::once(encoder.finish()));
+        self.ctx.queue.present(surface_tex);
+
+        // Free atlas glyphs unused this frame and clear the queue for the next.
+        #[cfg(feature = "text")]
+        self.text_layer.end_frame();
+
+        self.diag.set_draw_calls(draw_calls);
+        self.diag.record_frame();
+        Ok(())
+    }
+
+    /// Record this frame's scene pass — plus the optional text and overlay
+    /// passes — into `encoder`, drawing into `view` at `width`×`height`. Shared
+    /// by the on-surface present path and headless capture; the caller owns
+    /// acquire/submit/present (or the offscreen copy-back). Evaluates the active
+    /// preset into the active system using the current scene clock
+    /// (`self.time`, advanced by the caller — this does not touch it). Returns
+    /// the draw-call count.
+    fn draw_frame(
+        &mut self,
+        frame: &AnalysisFrame,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+    ) -> u32 {
         let Self {
             ctx,
             scenes,
@@ -294,21 +384,11 @@ impl Renderer {
             text_layer,
         } = self;
 
-        // Core-tracked GPU footprint: the swapchain dominates what the core
-        // allocates. An approximation (ADR-0008), refreshed each frame so it
-        // tracks resizes and Phase 6's swapchain trim.
-        diag.set_gpu_bytes(
-            ctx.config.width as u64
-                * ctx.config.height as u64
-                * SWAPCHAIN_BYTES_PER_PIXEL
-                * SWAPCHAIN_IMAGE_COUNT,
-        );
-
         let Some(preset) = roster.active_preset() else {
-            return Ok(()); // no presets loaded — nothing to draw
+            return 0; // no presets loaded — nothing to draw
         };
         let Some(scene) = scenes.get_mut(system_slot(preset.system)) else {
-            return Ok(());
+            return 0;
         };
 
         // Evaluate the preset's bindings into the system's named parameters.
@@ -328,21 +408,8 @@ impl Renderer {
         }
         scene.update(frame);
 
-        let Some(surface_tex) = Self::acquire(ctx)? else {
-            diag.record_dropped(); // transient (timeout/occluded) — skip this frame
-            return Ok(());
-        };
-        let view = surface_tex
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = ctx
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("lmv-frame"),
-            });
-
-        let aspect = ctx.config.width as f32 / ctx.config.height.max(1) as f32;
-        scene.render(&ctx.queue, &mut encoder, &view, aspect);
+        let aspect = width as f32 / height.max(1) as f32;
+        scene.render(&ctx.queue, encoder, view, aspect);
 
         // One scene pass, plus the optional text and overlay passes below.
         let mut draw_calls = 1u32;
@@ -354,15 +421,15 @@ impl Renderer {
         // top of the text.
         #[cfg(feature = "text")]
         {
-            if text_layer.prepare(&ctx.device, &ctx.queue, ctx.config.width, ctx.config.height) {
+            if text_layer.prepare(&ctx.device, &ctx.queue, width, height) {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("lmv-text-pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
+                        view,
                         depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            // Load: composite over the scene already in the surface.
+                            // Load: composite over the scene already in the view.
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
                         },
@@ -381,35 +448,63 @@ impl Renderer {
             let metrics = diag.metrics();
             overlay.render(
                 &ctx.queue,
-                &mut encoder,
-                &view,
-                (ctx.config.width, ctx.config.height),
+                encoder,
+                view,
+                (width, height),
                 metrics,
                 diag.stats().samples().map(|s| s * 1000.0),
             );
             draw_calls += 1;
         }
 
-        ctx.queue.submit(std::iter::once(encoder.finish()));
-        ctx.queue.present(surface_tex);
+        draw_calls
+    }
 
-        // Free atlas glyphs unused this frame and clear the queue for the next.
+    /// Advance the scene clock one step and capture that single frame into an
+    /// offscreen texture, returning tight RGBA (Plan 0013). Off the hot path —
+    /// blocks on GPU readback; never call it from a live loop.
+    pub fn capture_frame(&mut self, frame: &AnalysisFrame) -> Result<CaptureImage, RenderError> {
+        self.time += scenes::SCENE_DT;
+        self.capture_at_clock(frame)
+    }
+
+    /// Draw the active preset for `frame` at the **current** clock into a fresh
+    /// offscreen texture and read it back. Does not advance the clock, so
+    /// callers that already stepped it share this. The whole path (clear → draw
+    /// → copy → map) is deterministic for a given `(preset, frame, clock)`.
+    fn capture_at_clock(&mut self, frame: &AnalysisFrame) -> Result<CaptureImage, RenderError> {
+        let (width, height) = (self.ctx.config.width, self.ctx.config.height);
+        let format = self.ctx.surface_format();
+        let (texture, view) = capture::create_target(&self.ctx.device, format, width, height);
+        let (buffer, padded_bpr) = capture::create_readback(&self.ctx.device, width, height);
+        let mut encoder = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("lmv-capture-frame"),
+            });
+        capture::record_clear(&mut encoder, &view);
+        let _ = self.draw_frame(frame, &mut encoder, &view, width, height);
+        capture::record_copy(&mut encoder, &texture, &buffer, padded_bpr, width, height);
+        self.ctx.queue.submit(std::iter::once(encoder.finish()));
+
         #[cfg(feature = "text")]
-        text_layer.end_frame();
+        self.text_layer.end_frame();
 
-        diag.set_draw_calls(draw_calls);
-        diag.record_frame();
-        Ok(())
+        capture::read_back(&self.ctx.device, &buffer, width, height, padded_bpr)
     }
 
     fn acquire(ctx: &RenderContext) -> Result<Option<wgpu::SurfaceTexture>, RenderError> {
         use wgpu::CurrentSurfaceTexture as C;
-        match ctx.surface.get_current_texture() {
+        let Some(surface) = ctx.surface.as_ref() else {
+            return Ok(None); // headless context — no swapchain to present into
+        };
+        match surface.get_current_texture() {
             C::Success(t) | C::Suboptimal(t) => Ok(Some(t)),
             C::Timeout | C::Occluded => Ok(None),
             C::Outdated | C::Lost => {
                 ctx.reconfigure();
-                match ctx.surface.get_current_texture() {
+                match surface.get_current_texture() {
                     C::Success(t) | C::Suboptimal(t) => Ok(Some(t)),
                     C::Validation => Err(RenderError::SurfaceValidation),
                     _ => Ok(None),
@@ -429,7 +524,8 @@ mod tests {
     // file's hot-path panic-denial pragma — test code is not the render path.
     #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
-    use super::Roster;
+    use super::{HeadlessOptions, Renderer, Roster};
+    use crate::dsp::AnalysisFrame;
     use crate::preset::Preset;
 
     /// A minimal valid preset: a known system + explicit name, no params.
@@ -471,5 +567,32 @@ mod tests {
         r.select(2);
         r.set_presets(vec![preset("solo")]); // index 2 now out of range
         assert_eq!(r.name(), "solo");
+    }
+
+    /// Phase 1 (Plan 0013): a surface-less renderer captures the active preset
+    /// into an offscreen texture. `prefer_software` (WARP on DX12) keeps it
+    /// reproducible on any adapter. Asserts a full tight RGBA buffer with at
+    /// least one non-black pixel — the preset actually drew.
+    #[test]
+    fn headless_captures_a_non_black_frame() {
+        let mut renderer = Renderer::new_headless(HeadlessOptions {
+            width: 256,
+            height: 256,
+            prefer_software: true,
+        })
+        .expect("headless renderer builds on the software adapter");
+
+        let img = renderer
+            .capture_frame(&AnalysisFrame::default())
+            .expect("capture succeeds");
+
+        assert_eq!(img.width, 256);
+        assert_eq!(img.height, 256);
+        assert_eq!(img.rgba.len(), 256 * 256 * 4, "tight RGBA, no row padding");
+        let non_black = img
+            .rgba
+            .chunks_exact(4)
+            .any(|px| px[0] > 0 || px[1] > 0 || px[2] > 0);
+        assert!(non_black, "the active preset drew at least one lit pixel");
     }
 }
