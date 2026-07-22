@@ -127,15 +127,21 @@ Retargeted requirements — chosen to be enforceable by the Plan 0011 diagnostic
   own; the actionable lever is **our** additions — render-pipeline / shader / resource count. A new
   built-in system states its working-set delta on the reference box (harness-measured), so growth is a
   recorded choice, not a surprise. (Footprint rose from ~200 MB to ~300 MB across Plans 0003/0010/0011,
-  most plausibly from added pipelines — exactly this cost, previously untracked.)
+  most plausibly from added pipelines — exactly this cost, previously untracked.) **Now quantified**
+  (Plan 0012, reference AMD iGPU box, private commit): the fixed driver floor is **~327 MB** and our
+  entire visual system (2 scene pipelines + overlay + DSP + audio + presets) adds only **~11 MB (~3%)**;
+  culling 3 dead scene pipelines saved ~2 MB, so pipeline count is a real but **weak** lever
+  (~1 MB/pipeline) against a floor that dominates.
 - **Soft ceiling, for regressions only:** ~350 MB working set on the reference AMD iGPU box with the
   current built-in system set. A single-machine, vendor-dependent tripwire to catch a regression — not
-  a portable absolute (a different GPU/driver has a different floor).
+  a portable absolute (a different GPU/driver has a different floor). Vendor spread (Intel iGPU) is a
+  pending on-device capture — `docs/on-device-validation.md`.
 - **Our own Rust state stays <~1 MB** (ring buffer ~340 ms of f32, fixed DSP buffers, a few uniform
   buffers) — unchanged; the target was never our allocations.
-- **Open (optional dev spike):** isolate the bare wgpu/DX12 driver floor (a scene-less window measured
-  on the same box) to split the fixed floor from our overhead and put a hard number on the per-system
-  budget. Refines the points above; does not change ADR-0010.
+- **Driver floor isolated (Plan 0012 Phase 2, resolved):** the once-optional dev spike ran —
+  `standalone/examples/floor.rs`, a scene-less window standing up only the wgpu context — and put the
+  hard **~327 MB private-commit** floor number on the split above. It confirms ADR-0010's diagnosis: the
+  cost is the driver stack, not our code. Does not change ADR-0010.
 
 Measurement method (repeatable): PowerShell `Get-Process lmv` → `WorkingSet64` vs `PrivateMemorySize64`,
 `.Modules` by mapped size, and which backend loader DLLs are mapped. The private-vs-working-set split is

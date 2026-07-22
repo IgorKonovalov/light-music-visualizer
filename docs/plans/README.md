@@ -12,9 +12,37 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | [0008](0008-preset-browse-overlay.md) | In-app preset browse overlay (standalone) | approved | Give the standalone a keyboard-driven browse overlay over the running visual: a key opens a scrollable list of preset names, arrows move a highlight, typing narrows it (type-to-filter), Enter jumps straight to that preset, Esc closes. Needs the codebase's first text rendering — **glyphon** behind a core `text` cargo feature ([ADR-0009](../adrs/0009-glyphon-text-rendering.md)), via a reusable `render::text` seam Plan 0009's HUD later shares. Adds `Renderer::preset_names`/`select_preset`; overlay logic is a pure unit-tested `OverlayState` in the shell. Standalone-only (plugin stays cycle-only), keyboard-only, C ABI untouched. The interview's chosen selection UX, split out of Plan 0007. |
 | [0009](0009-live-performance-features.md) | Live performance features (standalone) | approved | Drive a live DJ show onto a projector from the standalone: borderless-fullscreen on a chosen display, line-in / audio-interface capture (alongside loopback), self-rotating scenes (energy/drop-biased) with a manual hotkey override, experimental track-change detection (core DSP nudge), and a ≥4-hour instrumented soak. Operator choices persist in a per-user `config.toml`. Standalone-only via the native Rust API + one deterministic DSP field in core; C ABI frozen, no ADR. MIDI deferred. Roadmap item 2 (NFR §10). |
 | [0010](0010-line-geometry-scenes.md) | Line-geometry scenes: parametric curves, L-systems, star patterns | approved | Add a line-art category to the built-in system vocabulary, ported from the user's Maurer rose / L-systems / Islamic star pattern sketches. One shared `LineRenderer` (segments -> instanced quads, thick + glowing) under two build models: a cheap **parametric** system sampled per frame (the rose) and an expensive **generator** system built at preset load and cached (L-systems, star patterns). Continuous audio drives transform/hue/draw-on every frame; beat accents advance precomputed structural states. New `[curve]`/`[generator]` TOML config table + one optional `Scene::configure` hook ([ADR-0007](../adrs/0007-line-geometry-generators.md)); extends ADR-0002 layer 2. Core-only, C ABI frozen. Preset files ride Plan 0007's seeding. |
-| [0012](0012-memory-floor-measure-and-scene-cull.md) | Measure the driver-memory floor + cull dead scenes | approved | Resolve [ADR-0010](../adrs/0010-accept-gpu-driver-memory-floor.md)'s open questions with numbers, and take the free memory win it points to. Three phases: (1) **cull the 3 dead legacy scenes** (`spectrum`/`pulse`/`starfield` — built + driver-compiled at startup but addressed by no preset; closes the Plan 0003 carry-forward), pricing the working-set delta as the first data point on "pipeline count as a memory lever"; (2) a **bare-wgpu driver-floor spike** (`standalone/examples/floor.rs`, a scene-less clear-only window) isolating the fixed DX12+driver floor from our per-system overhead; (3) a **human capture on the real §9 iGPU box(es)** confirming the §1 perf floor holds and recording footprint on a second GPU vendor. Produces the hard denominator NFR §12's per-system budget lacks; the architect folds it in at close. Core-internal + a throwaway example; C ABI frozen, no new ADR. **Explicitly not** the adaptive-quality tier system (roadmap item 3 remainder) — that consumes this plan's floor number. |
+
+## Standing (not a plan)
+
+- **[On-device validation — low-end Windows iGPU smoke](../on-device-validation.md)** — a
+  hardware-gated checklist, **not** a phased plan and **not** in the roster above: it never blocks a
+  plan from closing. Holds the low-end / older Windows iGPU checks (fps floor ≥ 60 @ 1080p; footprint
+  on a second GPU vendor) the user can only run once that box is in hand. Ticked when run; deleted when
+  empty. Currently home to the extracted Plan 0012 Phase 3 (also covers the identical Plan 0003 Phase 3
+  iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0012 — Measure the driver-memory floor + cull dead scenes](done/0012-memory-floor-measure-and-scene-cull.md) —
+  **done 2026-07-22**, passed Mode 4 review (no blockers, no majors). Two `dev` phase commits
+  (`50a7ea0`, `3de5611`); the third phase (human, low-end iGPU) was **extracted** to the standing
+  `docs/on-device-validation.md` checklist so the plan could close on completed work rather than wait on
+  hardware. **Phase 1** culled the three dead legacy scenes (`spectrum`/`pulse`/`starfield` — built +
+  driver-compiled at startup, addressed by no preset; closes the Plan 0003 carry-forward), leaving
+  `scenes/mod.rs` at `fragment_field` + `swarm`; measured delta **WS −3.3 MB / private −2.0 MB**, first
+  data point that pipeline count is a weak memory lever. **Phase 2** stood up `standalone/examples/floor.rs`,
+  a throwaway scene-less wgpu-context spike (construct-only — `RenderContext` exposes only
+  `new`/`resize`/`surface_format`, so the example measures at the configure boundary without widening
+  core's surface), isolating the fixed driver floor: **~327 MB private commit vs ~338 MB post-cull
+  standalone → our whole visual system is only ~11 MB (~3%)**. This resolves ADR-0010's two open items
+  (floor-vs-overhead split; pipeline count as a real-but-weak lever) and gave NFR §12 the hard
+  per-system denominator it lacked (folded in at close). Verified: `cargo test -p lmv-core` 9/9,
+  `cargo clippy --workspace --all-targets -D warnings` clean (lints the example too), no dangling refs
+  to the deleted modules, `floor.rs` links into no shipped binary and adds no dependency, dev-box smoke
+  rendered all 10 presets at ~165 fps / 0 drops. Core-internal + throwaway example; **C ABI frozen, no
+  new ADR.** **⚠ Carry-forward (human):** the low-end iGPU / second-vendor capture — see
+  `docs/on-device-validation.md` (does not block anything).
 
 - [0011 — Diagnostics harness + quick-win memory/perf trim](done/0011-diagnostics-and-memory-trim.md) —
   **done 2026-07-22**, passed Mode 4 review (no blockers, no majors; two nits). Seven phase commits

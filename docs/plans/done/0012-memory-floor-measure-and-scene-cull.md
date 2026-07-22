@@ -1,14 +1,33 @@
 # 0012 — Measure the driver-memory floor + cull dead scenes
 
-> **Status:** approved
+> **Status:** done (2026-07-22)
 > **Created:** 2026-07-22
-> **Owner skill(s):** dev, human
+> **Owner skill(s):** dev
 > **Related ADRs:** [0010](../adrs/0010-accept-gpu-driver-memory-floor.md) (accept the DX12/wgpu driver-stack floor; retarget NFR §12) — this plan resolves its open questions with numbers.
 > **Amended:** 2026-07-22 — Phase 2 recast from "clear-only render pass" to **construct-only**. A
 > feasibility check found `RenderContext` exposes only `new`/`resize`/`surface_format` publicly; its
 > `device`/`queue`/`surface` are `pub(crate)`, so an example compiling as a separate crate cannot encode
 > its own render pass without adding public API to core — which the phase's "no shipped-code change" rule
 > forbids. We measure at the configure boundary instead (a faithful floor; see Phase 2 and its risk note).
+>
+> **Closed 2026-07-22** (Mode 4, fresh session — code written in a prior session). The two `dev` phases
+> landed and produced the numbers the plan set out to get:
+> - **Phase 1** (`50a7ea0`): culled `spectrum`/`pulse`/`starfield`; measured delta **WS −3.3 MB / private
+>   −2.0 MB** (5→2 scenes) — pipeline count is a weak lever (~1 MB WS/pipeline), driver floor dominates.
+> - **Phase 2** (`3de5611`): bare-wgpu floor spike; **fixed floor ~327 MB private vs post-cull standalone
+>   ~338 MB private → our whole visual system adds only ~11 MB (~3%).** The construct-only number is not
+>   implausibly low (only ~11 MB under the standalone), so the configure-boundary measurement is faithful
+>   — no re-think, no core-surface widening needed.
+>
+> Verified at close: `cargo test -p lmv-core` 9/9, `cargo clippy --workspace --all-targets -D warnings`
+> clean (lints `floor.rs` too), no dangling references to the deleted scene modules (`scenes/mod.rs` now
+> lists only `fragment_field` + `swarm`), `floor.rs` touches no shipped code and adds no dependency, and a
+> dev-box smoke run rendered all 10 presets at ~165 fps / 0 dropped frames. NFR §12's per-system budget
+> was updated from these numbers at close.
+>
+> **Phase 3 (human, low-end iGPU validation) was extracted, not run** — moved to the standing
+> `docs/on-device-validation.md` checklist so this plan could close on its completed `dev` work instead of
+> waiting on hardware the user won't have until later. That check does not block anything here.
 
 ## TL;DR
 
@@ -120,16 +139,33 @@ skeleton — a real, priced reduction, not plumbing.
   allocation until first present), that is a **finding to route back to architect**, not a licence to
   expose `device`/`queue`; the fix would be scoped separately, not smuggled into this spike.
 
-### Phase 3 — Validate on the real §9 iGPU hardware
-- **Owner skill:** human
-- **Area:** standalone (runtime)
-- **What:** On the actual §9 "older Windows PC (iGPU)" box — and a second GPU vendor (Intel) if one is
-  available, since the dev box is AMD — run the post-Phase-1 standalone at 1080p, capture
-  `diagnostics.log`, and report: (a) the §1 perf floor holds (≥ 60 fps @ 1080p at the shipped single
-  fixed tier), and (b) the steady-state working set / private commit. This confirms whether the ~350 MB
-  ceiling is AMD-specific and whether the scene cull regressed nothing on the weakest box.
-- **Done when:** the user reports fps (≥ 60 @ 1080p) and WS/private from the iGPU box(es); a floor
-  regression or a wildly different vendor footprint is routed back to `dev`/`architect` as a follow-up.
+### Phase 3 — Validate on the real §9 iGPU hardware — EXTRACTED (not run)
+
+**Moved out of this plan at close (2026-07-22).** This was a `human` phase gated on the low-end / older
+Windows iGPU test box the user won't have until later. Keeping it here would have held Plan 0012 open on
+its two completed `dev` phases; instead its intent — confirm the §1 fps floor holds and record the
+footprint on a second GPU vendor — now lives in the standing **`docs/on-device-validation.md`** checklist,
+which explicitly does not block plan closes. See that file for the checklist item, the run instructions,
+and the escalation path (fps < 60 → `dev`/`architect`; wildly different vendor footprint → `architect`
+widens the NFR §12 ceiling).
+
+## Measured results (Phases 1–2, AMD iGPU dev box, release, 1080p)
+
+Working set is noisy run-to-run; **private commit is the stable figure** (ADR-0010).
+
+| Measurement | Working set | Private commit |
+|-------------|-------------|----------------|
+| Pre-cull standalone (5 scenes) | 362.2 MB | 339.9 MB |
+| Post-cull standalone (2 scenes) | 358.9 MB | 337.9 MB |
+| **Phase 1 cull delta** | **−3.3 MB** | **−2.0 MB** |
+| Fixed driver floor — `floor.rs` context only (Phase 2) | 343.7 MB | 327.2 MB |
+| **Phase 2 split — our whole visual system (standalone − floor)** | **~15 MB** | **~11 MB (~3%)** |
+
+The DX12 driver stack is ~97% of private commit; our two scene pipelines + overlay + DSP + audio +
+presets add only ~11 MB. This is the hard denominator NFR §12's per-system budget lacked, and it
+resolves ADR-0010's two "open" items: the floor-vs-overhead split (point 3) and the confirmation that
+pipeline count is a real but weak lever (~1 MB WS/pipeline). Vendor portability of the ceiling (point 4,
+Phase 3) is the one piece deferred to the on-device checklist.
 
 ## Risks & open questions
 
@@ -159,7 +195,9 @@ skeleton — a real, priced reduction, not plumbing.
   example), **no macOS** (Windows §9 box; the Mac path is the standing Plan 0001 carry-forward).
 
 ## Followups (after this lands)
-- Architect: set NFR §12's per-system working-set budget from the measured floor + Phase 1/3 deltas.
+- Architect: set NFR §12's per-system working-set budget from the measured floor + Phase 1 delta. **Done
+  at close** (2026-07-22) — §12 now carries the ~327 MB private floor and the ~11 MB per-system overhead;
+  the vendor-spread refinement waits on the `docs/on-device-validation.md` Phase-3 capture.
 - If Phase 2 shows our pipelines dominate our-overhead: a lazy-pipeline-construction plan (build systems
   on first use), weighed against the instant-cycle guarantee.
 - Adaptive-quality tiers + frame-time governor (roadmap item 3 remainder), scoped on the real §9 fps data.
