@@ -18,12 +18,15 @@
 )]
 
 pub mod context;
+pub mod overlay;
+mod overlay_font;
 pub mod scenes;
 
 use crate::diag::{Diag, Metrics};
 use crate::dsp::AnalysisFrame;
 use crate::preset::{Preset, SystemKind, Variables};
 pub use context::{RenderContext, RenderError};
+use overlay::Overlay;
 use scenes::Scene;
 
 /// Assumed bytes-per-pixel for the swapchain GPU-byte estimate (the common
@@ -54,6 +57,8 @@ pub struct Renderer {
     time: f32,
     /// Runtime diagnostics: rolling frame-time stats + overlay flags (Plan 0011).
     diag: Diag,
+    /// The debug overlay pass, painted only while `diag.overlay_enabled()`.
+    overlay: Overlay,
 }
 
 impl Renderer {
@@ -66,6 +71,7 @@ impl Renderer {
     ) -> Result<Self, RenderError> {
         let ctx = RenderContext::new(target, width, height)?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
+        let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         Ok(Self {
             ctx,
             scenes,
@@ -73,6 +79,7 @@ impl Renderer {
             active: 0,
             time: 0.0,
             diag: Diag::new(),
+            overlay,
         })
     }
 
@@ -98,6 +105,7 @@ impl Renderer {
         };
         let ctx = unsafe { RenderContext::new_unsafe(target, width, height) }?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
+        let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         Ok(Self {
             ctx,
             scenes,
@@ -105,6 +113,7 @@ impl Renderer {
             active: 0,
             time: 0.0,
             diag: Diag::new(),
+            overlay,
         })
     }
 
@@ -189,6 +198,7 @@ impl Renderer {
             active,
             time,
             diag,
+            overlay,
         } = self;
 
         // Core-tracked GPU footprint: the swapchain dominates what the core
@@ -241,11 +251,25 @@ impl Renderer {
         let aspect = ctx.config.width as f32 / ctx.config.height.max(1) as f32;
         scene.render(&ctx.queue, &mut encoder, &view, aspect);
 
+        // One scene pass, plus the overlay's instanced draw when it is enabled.
+        let mut draw_calls = 1u32;
+        if diag.overlay_enabled() {
+            let metrics = diag.metrics();
+            overlay.render(
+                &ctx.queue,
+                &mut encoder,
+                &view,
+                (ctx.config.width, ctx.config.height),
+                metrics,
+                diag.stats().samples().map(|s| s * 1000.0),
+            );
+            draw_calls += overlay.quad_count();
+        }
+
         ctx.queue.submit(std::iter::once(encoder.finish()));
         ctx.queue.present(surface_tex);
 
-        // One scene pass this frame; Phase 2's overlay adds to this count.
-        diag.set_draw_calls(1);
+        diag.set_draw_calls(draw_calls);
         diag.record_frame();
         Ok(())
     }
