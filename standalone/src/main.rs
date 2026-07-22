@@ -2,11 +2,14 @@
 mod capture_mac;
 #[cfg(windows)]
 mod capture_win;
+mod diaglog;
+mod rss;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use diaglog::DiagLog;
 use lmv_core::audio::{AudioFormat, SampleConsumer};
 use lmv_core::dsp::Analyzer;
 use lmv_core::render::Renderer;
@@ -45,6 +48,10 @@ struct AppState {
     occluded: bool,
     /// Frames since the last title refresh (title shows core-sourced fps + p99).
     title_tick: u32,
+    /// Whether the debug overlay is currently painted (toggled by F3).
+    overlay_on: bool,
+    /// ~1 Hz structured diagnostics logger (render thread only).
+    diag_log: DiagLog,
     /// Preset directory watched for hot-reload, with its last-seen signature
     /// and poll deadline.
     preset_dir: PathBuf,
@@ -104,6 +111,8 @@ impl AppState {
             scratch: vec![0.0; 32_768],
             occluded: false,
             title_tick: 0,
+            overlay_on: false,
+            diag_log: DiagLog::new(resolve_log_path()),
             preset_dir,
             preset_sig,
             last_preset_poll: start,
@@ -164,6 +173,10 @@ impl AppState {
             self.title_tick = 0;
             self.update_title();
         }
+        // Structured 1 Hz log (render thread). RSS is queried lazily, only on the
+        // seconds a sample is actually due.
+        let metrics = self.renderer.metrics();
+        self.diag_log.maybe_log(&metrics, rss::current_rss_bytes);
         self.window.request_redraw();
     }
 
@@ -307,6 +320,20 @@ impl ApplicationHandler for App {
                 state.update_title();
                 state.window.request_redraw();
             }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(KeyCode::F3),
+                        state: ElementState::Pressed,
+                        repeat: false,
+                        ..
+                    },
+                ..
+            } => {
+                state.overlay_on = !state.overlay_on;
+                state.renderer.set_overlay(state.overlay_on);
+                state.window.request_redraw();
+            }
             _ => {}
         }
     }
@@ -344,6 +371,13 @@ fn resolve_preset_dir() -> PathBuf {
             PathBuf::new()
         }
     }
+}
+
+/// Resolve `diagnostics.log` under the per-user app dir (alongside the shared
+/// `presets` dir). `None` if the OS data root can't be resolved — the logger
+/// then silently no-ops (degrade, never crash — NFR 10).
+fn resolve_log_path() -> Option<PathBuf> {
+    preset_data_root().map(|root| root.join(APP_DIR_NAME).join("diagnostics.log"))
 }
 
 #[cfg(windows)]
