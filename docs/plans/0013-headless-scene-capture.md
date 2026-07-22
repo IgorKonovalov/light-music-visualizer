@@ -158,10 +158,18 @@ flowchart LR
 ### Phase 2 — Deterministic frame primitive: preset-by-name + N-frame advance
 - **Owner skill:** dev
 - **Area:** core
-- **Files touched:** `core/src/render/mod.rs` (`select_preset`, `capture_preset`).
-- **Details:** `select_preset(&mut self, name) -> bool` (scan loaded presets; Plan 0008 overlap —
-  Risks). `capture_preset(name, frame, frames)`: select, reset scene clock to `0.0`, run `draw_frame`
-  `frames` times feeding the **same** fixed `AnalysisFrame`, read back — a pure function.
+- **Files touched:** `core/src/render/mod.rs` (`select_preset_by_name`, `capture_preset`).
+- **Details:** `select_preset_by_name(&mut self, name) -> bool` (scan loaded presets; Plan 0008
+  overlap **resolved** — see Risks). `capture_preset(name, frame, frames)`: select, reset scene clock
+  to `0.0`, run `draw_frame` `frames` times feeding the **same** fixed `AnalysisFrame`, read back — a
+  pure function.
+  > **Note (Plan 0008 close review, 2026-07-22):** the "first-to-land defines `select_preset`" plan is
+  > stale — 0008 landed **`select_preset(&mut self, index: usize) -> &str`** (by *absolute index*,
+  > returning the new active name), which does **not** match this phase's by-name `-> bool` shape. The
+  > two are complementary, not the same method, so **do not redefine `select_preset`** here (it would
+  > collide with a different signature). Add the by-name lookup under a distinct name —
+  > `select_preset_by_name(&str) -> bool` — ideally implemented on top of the existing
+  > `preset_names()` + index-based `select_preset`, rather than a parallel scan.
 - **Done when:** a `core` test captures `(preset, frame, N)` twice → **byte-identical**; `N=1` vs
   `N=120` differ. `prefer_software` so it holds on any CI adapter.
 
@@ -293,7 +301,8 @@ pub struct HeadlessOptions { pub width: u32, pub height: u32, pub prefer_softwar
 
 impl Renderer {
     pub fn new_headless(opts: HeadlessOptions) -> Result<Self, RenderError>;
-    pub fn select_preset(&mut self, name: &str) -> bool;
+    // Distinct from 0008's `select_preset(index) -> &str` (by index) — see Risks.
+    pub fn select_preset_by_name(&mut self, name: &str) -> bool;
     pub fn capture_preset(&mut self, name: &str, frame: &AnalysisFrame, frames: u32)
         -> Result<CaptureImage, RenderError>;
     // Feeds PCM through the same intake a frontend uses; captures at each analysis-frame index.
@@ -338,8 +347,11 @@ pixel/struct distinctness matrices, `near_duplicates`).
 - **`render` refactor touches the hot path.** Pure extraction of `draw_frame`; no new alloc/lock/log/
   clock on the on-surface path; keep the panic pragma; add `render/capture.rs`, `metrics.rs`,
   `signal.rs` to the `hygiene.rs` scan set if they carry per-frame indexing.
-- **Preset-by-name overlaps Plan 0008** — first to land defines `select_preset(&str)->bool`; flag at
-  Mode 4.
+- **Preset-by-name overlaps Plan 0008 — RESOLVED (0008 landed first, 2026-07-22).** 0008 defined
+  `select_preset(&mut self, index: usize) -> &str` (by *absolute index*). That is a different shape
+  from this plan's by-name `-> bool`, so the two are complementary rather than one reusing the other:
+  add the by-name selector under a **distinct** name (`select_preset_by_name(&str) -> bool`) built on
+  the existing `preset_names()` + index-based `select_preset` — do **not** redefine `select_preset`.
 - **Blocking readback + software-adapter speed**, multiplied by per-band (5 stimuli) + audio hops —
   small size/N in tests; CLI uses the real GPU at full size. Never wire readback into live `render()`.
 - **Real-clip licensing** — the committed WAV must be CC0/self-made (Phase 9 human vet); dev never
