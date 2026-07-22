@@ -1986,6 +1986,7 @@ version = "0.2.0"
 dependencies = [
  "block2 0.6.2",
  "dispatch2",
+ "image",
  "lmv-core",
  "objc2 0.6.4",
  "objc2-core-audio-types",

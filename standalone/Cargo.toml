@@ -23,6 +23,13 @@ lmv-core = { path = "../core", features = ["text"] }
 # Windowing (ADR-0001 fixes winit for the standalone shell).
 winit = "=0.30.13"
 
+# Dev-only image I/O for the headless-capture `shot` example (ADR-0011): encode
+# captured RGBA to PNG and tile the contact sheet. Dev-dependency scope keeps it
+# out of the shipped `lmv.exe` entirely (Plan 0012 sized that binary). Trimmed to
+# the PNG codec only; pinned exact per NFR 4 / the hygiene guard.
+[dev-dependencies]
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+
 # WASAPI loopback capture. Narrow feature set keeps the transitive cost low;
 # winit already pulls windows-sys, so the ecosystem dependency is a sunk cost.
 [target.'cfg(windows)'.dependencies]
