@@ -16,6 +16,7 @@
 )]
 
 pub mod fragment_field;
+pub mod lines;
 pub mod swarm;
 
 use crate::dsp::AnalysisFrame;
@@ -64,6 +65,7 @@ pub(crate) fn create_all(
             surface_format,
         )),
         Box::new(swarm::SwarmScene::new(device, surface_format)),
+        Box::new(lines::ParametricCurveScene::new(device, surface_format)),
     ]
 }
 

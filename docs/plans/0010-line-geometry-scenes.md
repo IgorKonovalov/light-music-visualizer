@@ -1,6 +1,6 @@
 # 0010 — Line-geometry scenes: parametric curves, L-systems, star patterns
 
-> **Status:** approved
+> **Status:** in-progress
 > **Created:** 2026-07-21
 > **Owner skill(s):** dev
 > **Related ADRs:** [0007-line-geometry-generators](../adrs/0007-line-geometry-generators.md); extends [0002-layered-preset-architecture](../adrs/0002-layered-preset-architecture.md) layer 2
