@@ -1,6 +1,6 @@
 # 0012 — Measure the driver-memory floor + cull dead scenes
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev, human
 > **Related ADRs:** [0010](../adrs/0010-accept-gpu-driver-memory-floor.md) (accept the DX12/wgpu driver-stack floor; retarget NFR §12) — this plan resolves its open questions with numbers.
