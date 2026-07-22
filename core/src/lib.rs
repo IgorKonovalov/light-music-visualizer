@@ -10,6 +10,7 @@
 #![warn(missing_docs)]
 
 pub mod audio;
+pub mod diag;
 pub mod dsp;
 pub mod ffi;
 pub mod preset;

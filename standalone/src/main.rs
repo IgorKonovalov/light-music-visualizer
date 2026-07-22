@@ -29,6 +29,10 @@ const APP_TITLE: &str = concat!("light-music-visualizer ", env!("CARGO_PKG_VERSI
 const APP_DIR_NAME: &str = "light-music-visualizer";
 /// How often to re-scan the preset directory for edits.
 const PRESET_POLL: Duration = Duration::from_millis(500);
+/// Refresh the window title (fps + p99) every this many rendered frames — a
+/// frame-count cadence keeps the shell clock-free for the title; the numbers
+/// themselves come from the core's diagnostics.
+const TITLE_UPDATE_FRAMES: u32 = 30;
 
 struct AppState {
     window: Arc<Window>,
@@ -39,8 +43,8 @@ struct AppState {
     _capture: Option<capture_handle::Handle>,
     scratch: Vec<f32>,
     occluded: bool,
-    fps_window_start: Instant,
-    fps_frames: u32,
+    /// Frames since the last title refresh (title shows core-sourced fps + p99).
+    title_tick: u32,
     /// Preset directory watched for hot-reload, with its last-seen signature
     /// and poll deadline.
     preset_dir: PathBuf,
@@ -77,6 +81,10 @@ impl AppState {
         reload_presets(&mut renderer, &preset_dir);
         let preset_sig = dir_signature(&preset_dir);
 
+        // Collect rolling frame-time stats from the first frame so the title
+        // shows live fps/p99 (the overlay itself stays off until F3 — Plan 0011).
+        renderer.enable_diagnostics(true);
+
         let (capture, consumer, format) = start_capture();
         let analyzer = Analyzer::new(format)
             .expect("capture layer already validated this format at the boundary");
@@ -84,7 +92,7 @@ impl AppState {
         // Frame pacing is a shell concern; the core stays clock-free (determinism).
         #[allow(
             clippy::disallowed_methods,
-            reason = "FPS-window / poll start; wall-clock pacing lives in the shell, not core analysis"
+            reason = "preset-poll start; wall-clock pacing lives in the shell, not core analysis"
         )]
         let start = Instant::now();
         Self {
@@ -95,8 +103,7 @@ impl AppState {
             _capture: capture,
             scratch: vec![0.0; 32_768],
             occluded: false,
-            fps_window_start: start,
-            fps_frames: 0,
+            title_tick: 0,
             preset_dir,
             preset_sig,
             last_preset_poll: start,
@@ -152,26 +159,25 @@ impl AppState {
         if let Err(err) = self.renderer.render(&frame) {
             eprintln!("render error: {err}");
         }
-        self.count_frame();
+        self.title_tick += 1;
+        if self.title_tick >= TITLE_UPDATE_FRAMES {
+            self.title_tick = 0;
+            self.update_title();
+        }
         self.window.request_redraw();
     }
 
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "FPS accounting reads the wall clock; core analysis stays clock-free"
-    )]
-    fn count_frame(&mut self) {
-        self.fps_frames += 1;
-        let elapsed = self.fps_window_start.elapsed();
-        if elapsed >= Duration::from_secs(1) {
-            let fps = self.fps_frames as f32 / elapsed.as_secs_f32();
-            let preset = self.renderer.preset_name();
-            let system = self.renderer.active_system_name();
-            self.window
-                .set_title(&format!("{APP_TITLE} — {preset} [{system}] — {fps:.0} fps"));
-            self.fps_window_start = Instant::now();
-            self.fps_frames = 0;
-        }
+    /// Refresh the window title with the preset, system, and the core's
+    /// diagnostics (fps + p99). No wall-clock read — the numbers come from the
+    /// core's gated clock, the cadence from a frame counter.
+    fn update_title(&mut self) {
+        let m = self.renderer.metrics();
+        let preset = self.renderer.preset_name();
+        let system = self.renderer.active_system_name();
+        self.window.set_title(&format!(
+            "{APP_TITLE} — {preset} [{system}] — {:.0} fps  p99 {:.1} ms",
+            m.fps, m.frame_ms_p99
+        ));
     }
 }
 
@@ -297,11 +303,8 @@ impl ApplicationHandler for App {
                     },
                 ..
             } => {
-                let preset = state.renderer.cycle_preset().to_owned();
-                let system = state.renderer.active_system_name();
-                state
-                    .window
-                    .set_title(&format!("{APP_TITLE} — {preset} [{system}]"));
+                state.renderer.cycle_preset();
+                state.update_title();
                 state.window.request_redraw();
             }
             _ => {}

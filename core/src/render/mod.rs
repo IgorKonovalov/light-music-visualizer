@@ -20,10 +20,18 @@
 pub mod context;
 pub mod scenes;
 
+use crate::diag::{Diag, Metrics};
 use crate::dsp::AnalysisFrame;
 use crate::preset::{Preset, SystemKind, Variables};
 pub use context::{RenderContext, RenderError};
 use scenes::Scene;
+
+/// Assumed bytes-per-pixel for the swapchain GPU-byte estimate (the common
+/// 8-bit RGBA/BGRA surface formats). An approximation, per ADR-0008.
+const SWAPCHAIN_BYTES_PER_PIXEL: u64 = 4;
+/// Assumed swapchain image count for the estimate until Phase 6 sets an explicit
+/// buffer count in the surface config.
+const SWAPCHAIN_IMAGE_COUNT: u64 = 2;
 
 /// A preset's system to its slot in the roster built by [`scenes::create_all`].
 /// The legacy scenes occupy later slots but no preset addresses them.
@@ -44,6 +52,8 @@ pub struct Renderer {
     /// Shared scene clock (seconds), advanced one fixed step per rendered frame.
     /// The single source for both an expression's `time` and system animation.
     time: f32,
+    /// Runtime diagnostics: rolling frame-time stats + overlay flags (Plan 0011).
+    diag: Diag,
 }
 
 impl Renderer {
@@ -62,6 +72,7 @@ impl Renderer {
             presets: crate::preset::default_presets(),
             active: 0,
             time: 0.0,
+            diag: Diag::new(),
         })
     }
 
@@ -93,6 +104,7 @@ impl Renderer {
             presets: crate::preset::default_presets(),
             active: 0,
             time: 0.0,
+            diag: Diag::new(),
         })
     }
 
@@ -121,6 +133,29 @@ impl Renderer {
             self.active = (self.active + 1) % self.presets.len();
         }
         self.preset_name()
+    }
+
+    /// Enable or disable rolling frame-time collection — the gated diagnostics
+    /// clock read (Plan 0011). The standalone leaves this on so the title always
+    /// shows live fps/p99; turning it off keeps the core fully clock-free.
+    pub fn enable_diagnostics(&mut self, on: bool) {
+        self.diag.set_collecting(on);
+    }
+
+    /// Turn the on-screen debug overlay on or off (off by default). Independent
+    /// of collection, so the plugin can log metrics without painting the overlay.
+    pub fn set_overlay(&mut self, on: bool) {
+        self.diag.set_overlay(on);
+    }
+
+    /// Whether the debug overlay is currently painted.
+    pub fn overlay_enabled(&self) -> bool {
+        self.diag.overlay_enabled()
+    }
+
+    /// The current diagnostics snapshot (fps, p99, GPU bytes, …).
+    pub fn metrics(&self) -> Metrics {
+        self.diag.metrics()
     }
 
     /// Name of the currently active preset.
@@ -153,7 +188,18 @@ impl Renderer {
             presets,
             active,
             time,
+            diag,
         } = self;
+
+        // Core-tracked GPU footprint: the swapchain dominates what the core
+        // allocates. An approximation (ADR-0008), refreshed each frame so it
+        // tracks resizes and Phase 6's swapchain trim.
+        diag.set_gpu_bytes(
+            ctx.config.width as u64
+                * ctx.config.height as u64
+                * SWAPCHAIN_BYTES_PER_PIXEL
+                * SWAPCHAIN_IMAGE_COUNT,
+        );
 
         let Some(preset) = presets.get(*active) else {
             return Ok(()); // no presets loaded — nothing to draw
@@ -180,7 +226,8 @@ impl Renderer {
         scene.update(frame);
 
         let Some(surface_tex) = Self::acquire(ctx)? else {
-            return Ok(()); // transient (timeout/occluded) — skip this frame
+            diag.record_dropped(); // transient (timeout/occluded) — skip this frame
+            return Ok(());
         };
         let view = surface_tex
             .texture
@@ -196,6 +243,10 @@ impl Renderer {
 
         ctx.queue.submit(std::iter::once(encoder.finish()));
         ctx.queue.present(surface_tex);
+
+        // One scene pass this frame; Phase 2's overlay adds to this count.
+        diag.set_draw_calls(1);
+        diag.record_frame();
         Ok(())
     }
 

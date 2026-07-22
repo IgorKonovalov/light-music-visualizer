@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 
 /// The panic-denial header every hot-path module must carry. Copy it verbatim
 /// to the top of any new file under `core/src/dsp/`, `core/src/render/`,
-/// `core/src/ffi.rs`, `core/src/audio.rs`, `core/src/preset/expr.rs`, or the
-/// `lmv-ring` crate's `src/` (the extracted SPSC ring, Plan 0005):
+/// `core/src/diag/`, `core/src/ffi.rs`, `core/src/audio.rs`,
+/// `core/src/preset/expr.rs`, or the `lmv-ring` crate's `src/` (the extracted
+/// SPSC ring, Plan 0005):
 ///
 /// ```ignore
 /// #![deny(
@@ -66,6 +67,7 @@ fn hot_path_modules_carry_the_panic_pragma() {
     let targets = [
         src.join("dsp"),
         src.join("render"),
+        src.join("diag"),
         src.join("ffi.rs"),
         src.join("audio.rs"),
         // Per-frame preset evaluator (Plan 0003): a single hot-path file inside
