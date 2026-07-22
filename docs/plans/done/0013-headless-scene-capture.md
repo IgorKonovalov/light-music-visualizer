@@ -1,6 +1,15 @@
 # 0013 — Headless scene capture + differential visual QA (reactivity, distinctness, sanity, animation, beat) + golden images + shot CLI
 
-> **Status:** in-progress
+> **Status:** done — Phases 1-8 (dev) landed in eight commits (`ecc50e5`, `ba68026`,
+> `d11a7f0`, `889f4e3`, `26a3180`, `4b54d1e`, `8152943`, `4364464`) plus the
+> `assets/test` gitignore (`a16be92`); passed Mode 4 review 2026-07-22 (no blockers, no
+> majors). Verified: full `cargo test -p lmv-core` green (18 lib unit + animation/beat/
+> distinctness/golden/reactivity/sanity/dsp/ffi/preset/hygiene binaries, all software-adapter
+> where GPU-bound); `cargo clippy -p lmv-core -p standalone --all-targets -D warnings` clean
+> (lints the `shot` example); C ABI untouched (still v3); hygiene guard covers the new
+> `render/capture.rs` + `render/metrics.rs`; three golden baselines eyeballed and visually sane.
+> Phase 9 (human CC0 clip) is the outstanding handoff — non-blocking demo polish; the
+> `--signal` path validates the whole audio pipeline with no asset. See the review notes below.
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev, human
 > **Related ADRs:** [0011](../adrs/0011-image-crate-for-capture-tooling.md) (the `image`
@@ -290,6 +299,15 @@ flowchart LR
 - **Done when:** a properly-licensed short WAV is committed under `assets/test/`, and
   `cargo run -p lmv-standalone --example shot -- --audio assets/test/<name>.wav --strip 8 --out
   strip.png` produces a filmstrip that visibly reacts to the music.
+- **Close-review note (2026-07-22):** dev implemented a **safer variant** of this — `assets/test/*`
+  is **gitignored** (only a tracked `assets/test/README.md`, commit `a16be92`), so the clip is
+  supplied and used **locally, never committed**. This resolves the plan's own licensing risk
+  ("dev never commits sourced music") more cleanly and does not block anything (the `--signal`
+  path validates the full audio pipeline with no asset). It does mean the literal "committed under
+  `assets/test/`" wording above no longer applies: the standing task is now just *drop a local
+  16-bit-PCM WAV and eyeball a filmstrip*. If the user does want a clip in-repo, they must add a
+  CC0/self-made WAV and an `!assets/test/<name>.wav` un-ignore line — a deliberate opt-in, not the
+  default.
 
 ## Data shapes
 

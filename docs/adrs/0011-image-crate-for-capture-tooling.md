@@ -1,6 +1,6 @@
 # ADR-0011 — Use the `image` crate (dev-dependency only) for headless-capture PNG I/O and golden compare
 
-> **Status:** proposed
+> **Status:** accepted (Plan 0013 closed 2026-07-22)
 > **Date:** 2026-07-22
 > **Related plan(s):** [0013](../plans/0013-headless-scene-capture.md)
 
