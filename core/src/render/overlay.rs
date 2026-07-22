@@ -35,10 +35,9 @@ const PAD: f32 = 8.0;
 const FONT_PX: f32 = 2.0; // device pixels per font pixel
 const CHAR_ADVANCE: f32 = (GLYPH_W as f32 + 1.0) * FONT_PX;
 const TEXT_H: f32 = GLYPH_H as f32 * FONT_PX;
-const SPARK_W: f32 = 240.0;
-const SPARK_H: f32 = 36.0;
-const BAR_H: f32 = 10.0;
-const CONTENT_W: f32 = SPARK_W;
+const SPARK_W: f32 = 240.0; // minimum graph width; grows to fit the readout
+const SPARK_H: f32 = 72.0; // tall enough to read the frame-time trace + spikes
+const BAR_H: f32 = 12.0;
 
 /// Frame time (ms) that fills the sparkline to the top — two 60 fps frames.
 const SPARK_MAX_MS: f32 = 33.3;
@@ -64,6 +63,9 @@ const SPARK_WARN: Rgba = [0.95, 0.75, 0.20, 1.0];
 const SPARK_BAD: Rgba = [0.95, 0.32, 0.32, 1.0];
 const BAR_BG_COLOR: Rgba = [0.14, 0.14, 0.18, 0.85];
 const BAR_FILL_COLOR: Rgba = [0.35, 0.60, 1.00, 1.0];
+// Dim reference line drawn across the sparkline at the 60 fps budget, so the
+// trace reads against a known mark instead of floating.
+const BUDGET_LINE_COLOR: Rgba = [0.55, 0.55, 0.62, 0.5];
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -238,11 +240,26 @@ impl Overlay {
     fn build(&mut self, vp: Vp, metrics: Metrics) {
         self.quads.clear();
 
-        // Panel geometry sized to the content.
-        let panel_w = CONTENT_W + PAD * 2.0;
+        // Build the readout first so the panel sizes to whichever is wider — the
+        // text row or the graph — and everything shares one content width.
+        // Unit labels uppercase: legible at 5x7.
+        self.text.clear();
+        let _ = write!(
+            self.text,
+            "{:.0} FPS  {:.1} MS  {:.0} MB",
+            metrics.fps,
+            metrics.frame_ms_p99,
+            metrics.gpu_bytes as f32 / (1024.0 * 1024.0),
+        );
+        // Text width, excluding the last glyph's trailing gap.
+        let text_w = (self.text.chars().count() as f32 * CHAR_ADVANCE - FONT_PX).max(0.0);
+        let content_w = text_w.max(SPARK_W);
+
+        let content_x = MARGIN + PAD;
         let text_y = MARGIN + PAD;
         let spark_y = text_y + TEXT_H + PAD;
         let bar_y = spark_y + SPARK_H + PAD;
+        let panel_w = content_w + PAD * 2.0;
         let panel_h = (bar_y + BAR_H + PAD) - MARGIN;
         push_rect(
             &mut self.quads,
@@ -254,27 +271,18 @@ impl Overlay {
             PANEL_COLOR,
         );
 
-        // Numeric readout. Unit labels uppercase — legible at 5x7.
-        self.text.clear();
-        let _ = write!(
-            self.text,
-            "{:.0} FPS  {:.1} MS  {:.0} MB",
-            metrics.fps,
-            metrics.frame_ms_p99,
-            metrics.gpu_bytes as f32 / (1024.0 * 1024.0),
-        );
-        draw_text(&mut self.quads, vp, MARGIN + PAD, text_y, &self.text);
+        draw_text(&mut self.quads, vp, content_x, text_y, &self.text);
 
         // Frame-time sparkline: one vertical bar per retained sample, newest at
         // the right, colored by how close each frame ran to the 60 fps budget.
-        let spark_x = MARGIN + PAD;
         let count = self.samples.len();
         if count > 0 {
-            let bw = (SPARK_W / count as f32).max(1.0);
+            let step = content_w / count as f32;
+            let bw = step.max(1.0);
             for (i, &ms) in self.samples.iter().enumerate() {
                 let frac = (ms / SPARK_MAX_MS).clamp(0.0, 1.0);
                 let h = (frac * SPARK_H).max(1.0);
-                let x = spark_x + i as f32 * (SPARK_W / count as f32);
+                let x = content_x + i as f32 * step;
                 let color = if ms <= BUDGET_MS * 1.1 {
                     SPARK_GOOD
                 } else if ms <= SPARK_MAX_MS {
@@ -286,15 +294,26 @@ impl Overlay {
                 push_rect(&mut self.quads, vp, x, spark_y + SPARK_H - h, bw, h, color);
             }
         }
-
-        // GPU-footprint bar: dark track with a colored fill.
-        let bar_x = MARGIN + PAD;
+        // Budget reference line across the band at the 60 fps mark, so the trace
+        // reads against a known threshold instead of floating.
+        let budget_h = (BUDGET_MS / SPARK_MAX_MS).clamp(0.0, 1.0) * SPARK_H;
         push_rect(
             &mut self.quads,
             vp,
-            bar_x,
+            content_x,
+            spark_y + SPARK_H - budget_h,
+            content_w,
+            1.0,
+            BUDGET_LINE_COLOR,
+        );
+
+        // GPU-footprint bar: dark track with a colored fill.
+        push_rect(
+            &mut self.quads,
+            vp,
+            content_x,
             bar_y,
-            CONTENT_W,
+            content_w,
             BAR_H,
             BAR_BG_COLOR,
         );
@@ -303,9 +322,9 @@ impl Overlay {
             push_rect(
                 &mut self.quads,
                 vp,
-                bar_x,
+                content_x,
                 bar_y,
-                CONTENT_W * fill,
+                content_w * fill,
                 BAR_H,
                 BAR_FILL_COLOR,
             );
