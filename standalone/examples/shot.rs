@@ -15,15 +15,20 @@
 //!   --all                    contact sheet of every preset (needs --out)
 //!   --report [family=<sys>]  per-family reactivity / animation / distinctness
 //!            [--json]        emit JSON instead of a text table
+//!   --signal <kind:param>    synth audio filmstrip (click:120, bass:60, ...)
+//!   --audio <clip.wav>       filmstrip from a 16-bit PCM WAV
+//!   --strip <N>              frames tiled along the audio (default 8)
 //!
 //! Exit code is non-zero with a message on any bad argument or failure.
 
 use std::path::{Path, PathBuf};
 
-use lmv_core::dsp::AnalysisFrame;
+use lmv_core::audio::AudioFormat;
+use lmv_core::dsp::{AnalysisFrame, HOP_SIZE};
 use lmv_core::preset::{Preset, SystemKind, default_presets, load_dir};
 use lmv_core::render::metrics::{coverage, frame_diff, quadrant_spread, struct_diff};
 use lmv_core::render::{CaptureImage, HeadlessOptions, Renderer};
+use lmv_core::signal::{bass_sine, chord, click_track, noise, treble_tone};
 
 /// Mirrors the standalone's per-user app dir (main.rs `APP_DIR_NAME`).
 const APP_DIR_NAME: &str = "light-music-visualizer";
@@ -55,6 +60,9 @@ struct Args {
     out: Option<PathBuf>,
     family: Option<SystemKind>,
     json: bool,
+    signal: Option<String>,
+    audio: Option<PathBuf>,
+    strip: u32,
 }
 
 impl Default for Args {
@@ -69,6 +77,9 @@ impl Default for Args {
             out: None,
             family: None,
             json: false,
+            signal: None,
+            audio: None,
+            strip: 8,
         }
     }
 }
@@ -94,6 +105,15 @@ fn parse_args() -> Result<Args, String> {
             "--all" => args.mode = Mode::All,
             "--report" => args.mode = Mode::Report,
             "--json" => args.json = true,
+            "--signal" => args.signal = Some(next_value(&mut it, "--signal")?),
+            "--audio" => args.audio = Some(PathBuf::from(next_value(&mut it, "--audio")?)),
+            "--strip" => {
+                args.strip = next_value(&mut it, "--strip")?
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|n| *n >= 1)
+                    .ok_or("--strip expects a positive integer")?;
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -165,7 +185,11 @@ fn print_usage() {
          --out <path>               PNG path (shot) or dir/file (--all)\n\
          --all                      contact sheet of every preset (needs --out)\n\
          --report [family=<sys>]    metrics table (fragment_field | swarm)\n\
-         --json                     emit the report as JSON"
+         --json                     emit the report as JSON\n\
+         --signal <kind:param>      synth audio filmstrip: click:120 bass:60\n\
+                                    treble:10000 noise:7 chord (needs --out)\n\
+         --audio <clip.wav>         filmstrip from a 16-bit PCM WAV (needs --out)\n\
+         --strip <N>                frames tiled along the audio (default 8)"
     );
 }
 
@@ -250,6 +274,11 @@ fn renderer(width: u32, height: u32, presets: Vec<Preset>) -> Result<Renderer, S
 fn run() -> Result<(), String> {
     let args = parse_args()?;
     let (presets, source) = load_library();
+    // An audio source (synth signal or WAV) takes precedence — it drives a
+    // filmstrip regardless of the shot/all/report mode default.
+    if args.signal.is_some() || args.audio.is_some() {
+        return filmstrip(args, presets, &source);
+    }
     match args.mode {
         Mode::Shot => shot(args, presets, &source),
         Mode::All => contact_sheet(args, presets, &source),
@@ -376,6 +405,211 @@ fn contact_sheet_path(out: &Path) -> PathBuf {
     } else {
         out.join("contact-sheet.png")
     }
+}
+
+// ---------------------------------------------------------------------------
+// Audio filmstrips (--signal / --audio)
+// ---------------------------------------------------------------------------
+
+/// Duration synthesized for a `--signal` (enough for several 120 BPM beats).
+const SIGNAL_SECS: f32 = 4.0;
+/// Hops skipped at the start so the strip samples past the analyzer's warm-up.
+const FILMSTRIP_WARMUP: usize = 8;
+
+fn filmstrip(args: Args, presets: Vec<Preset>, source: &str) -> Result<(), String> {
+    let out = args
+        .out
+        .clone()
+        .ok_or("--signal/--audio needs --out <path>")?;
+
+    let (pcm, format, label) = match (&args.signal, &args.audio) {
+        (Some(spec), _) => {
+            let (pcm, fmt) = synth_signal(spec)?;
+            (pcm, fmt, format!("signal {spec}"))
+        }
+        (None, Some(path)) => {
+            let (pcm, fmt) = read_wav_16bit(path)?;
+            (pcm, fmt, format!("audio {}", path.display()))
+        }
+        (None, None) => return Err("no --signal or --audio given".to_string()),
+    };
+
+    let meta = preset_meta(&presets);
+    let name = args
+        .preset
+        .clone()
+        .or_else(|| meta.first().map(|(n, _)| n.clone()))
+        .ok_or("no preset available to render")?;
+
+    let mut r = renderer(args.width, args.height, presets)?;
+    let at = filmstrip_indices(pcm.len(), format, args.strip)?;
+    let frames = r
+        .capture_audio(&name, &pcm, format, &at)
+        .map_err(|e| format!("capture audio: {e}"))?;
+
+    let strip = tile_filmstrip(&frames)?;
+    save_image(&strip, &out)?;
+    println!(
+        "wrote {} ({} frames, preset {name}, {label}) [{source}]",
+        out.display(),
+        frames.len(),
+    );
+    Ok(())
+}
+
+/// `--strip` frame indices, evenly spaced from just past warm-up to the last
+/// analysis frame the PCM produces.
+fn filmstrip_indices(pcm_len: usize, format: AudioFormat, strip: u32) -> Result<Vec<u32>, String> {
+    let hop_samples = HOP_SIZE * format.channels as usize;
+    let total = pcm_len / hop_samples.max(1);
+    if total <= FILMSTRIP_WARMUP + 1 {
+        return Err("audio too short for a filmstrip".to_string());
+    }
+    let start = FILMSTRIP_WARMUP;
+    let end = total - 1;
+    let n = strip.max(1);
+    if n == 1 {
+        return Ok(vec![start as u32]);
+    }
+    let span = (end - start) as f32;
+    Ok((0..n)
+        .map(|i| (start as f32 + span * i as f32 / (n - 1) as f32).round() as u32)
+        .collect())
+}
+
+/// Parse `<kind:param>` into synthesized PCM. Zero committed asset — this is the
+/// self-contained validation of the whole audio path.
+fn synth_signal(spec: &str) -> Result<(Vec<f32>, AudioFormat), String> {
+    let format = AudioFormat {
+        sample_rate: 48_000,
+        channels: 2,
+    };
+    let (kind, param) = spec.split_once(':').unwrap_or((spec, ""));
+    let pcm = match kind {
+        "click" => click_track(parse_param(param, "click BPM")?, SIGNAL_SECS, format),
+        "bass" => bass_sine(parse_param(param, "bass Hz")?, SIGNAL_SECS, format),
+        "treble" | "treb" => treble_tone(parse_param(param, "treble Hz")?, SIGNAL_SECS, format),
+        "noise" => {
+            let seed = param.parse::<u64>().unwrap_or(1);
+            noise(seed, SIGNAL_SECS, 0.8, format)
+        }
+        "chord" => chord(&[220.0, 277.0, 330.0], SIGNAL_SECS, format),
+        other => {
+            return Err(format!(
+                "--signal: unknown kind `{other}` (click|bass|treble|noise|chord)"
+            ));
+        }
+    };
+    Ok((pcm, format))
+}
+
+fn parse_param(param: &str, what: &str) -> Result<f32, String> {
+    param
+        .parse::<f32>()
+        .map_err(|_| format!("--signal: expected a {what} value, got `{param}`"))
+}
+
+/// A minimal hand-rolled 16-bit-PCM WAV reader (no decoder dependency). Supports
+/// uncompressed PCM (format 1), 16-bit, any channel count / sample rate. Other
+/// encodings are a documented followup.
+fn read_wav_16bit(path: &Path) -> Result<(Vec<f32>, AudioFormat), String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    if bytes.get(0..4) != Some(b"RIFF") || bytes.get(8..12) != Some(b"WAVE") {
+        return Err(format!("{} is not a RIFF/WAVE file", path.display()));
+    }
+
+    let mut channels = 0u16;
+    let mut sample_rate = 0u32;
+    let mut data: Option<&[u8]> = None;
+    let mut pos = 12usize;
+    while pos + 8 <= bytes.len() {
+        let id = bytes.get(pos..pos + 4).unwrap_or(&[]);
+        let size = le_u32(&bytes, pos + 4).unwrap_or(0) as usize;
+        let body = pos + 8;
+        let end = body.saturating_add(size).min(bytes.len());
+        match id {
+            b"fmt " => {
+                let audio_format = le_u16(&bytes, body).unwrap_or(0);
+                let bits = le_u16(&bytes, body + 14).unwrap_or(0);
+                if audio_format != 1 {
+                    return Err("only uncompressed PCM (format 1) WAV is supported".to_string());
+                }
+                if bits != 16 {
+                    return Err(format!(
+                        "only 16-bit PCM WAV is supported (found {bits}-bit)"
+                    ));
+                }
+                channels = le_u16(&bytes, body + 2).unwrap_or(0);
+                sample_rate = le_u32(&bytes, body + 4).unwrap_or(0);
+            }
+            b"data" => data = bytes.get(body..end),
+            _ => {}
+        }
+        pos = body + size + (size & 1); // chunks are word-aligned
+    }
+
+    let data = data.ok_or("WAV has no data chunk")?;
+    let samples: Vec<f32> = data
+        .chunks_exact(2)
+        .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
+        .collect();
+    let format = AudioFormat {
+        sample_rate,
+        channels,
+    }
+    .validate()
+    .map_err(|e| format!("unusable WAV format: {e}"))?;
+    Ok((samples, format))
+}
+
+fn le_u16(b: &[u8], at: usize) -> Option<u16> {
+    Some(u16::from_le_bytes([*b.get(at)?, *b.get(at + 1)?]))
+}
+
+fn le_u32(b: &[u8], at: usize) -> Option<u32> {
+    Some(u32::from_le_bytes([
+        *b.get(at)?,
+        *b.get(at + 1)?,
+        *b.get(at + 2)?,
+        *b.get(at + 3)?,
+    ]))
+}
+
+/// Tile the captured frames left-to-right into one filmstrip, each scaled to a
+/// fixed height.
+fn tile_filmstrip(frames: &[CaptureImage]) -> Result<image::RgbaImage, String> {
+    const STRIP_H: u32 = 200;
+    const PAD: u32 = 4;
+    let first = frames.first().ok_or("no frames captured")?;
+    let thumb_w = (first.width * STRIP_H / first.height.max(1)).max(1);
+    let n = frames.len() as u32;
+    let canvas_w = n * thumb_w + (n + 1) * PAD;
+    let canvas_h = STRIP_H + 2 * PAD;
+    let mut canvas =
+        image::RgbaImage::from_pixel(canvas_w, canvas_h, image::Rgba([18, 18, 22, 255]));
+    for (i, frame) in frames.iter().enumerate() {
+        let full = to_rgba(frame)?;
+        let thumb = image::imageops::resize(
+            &full,
+            thumb_w,
+            STRIP_H,
+            image::imageops::FilterType::Triangle,
+        );
+        let x = PAD + i as u32 * (thumb_w + PAD);
+        image::imageops::overlay(&mut canvas, &thumb, x as i64, PAD as i64);
+    }
+    Ok(canvas)
+}
+
+/// Save a prepared `RgbaImage` to `path`, creating parent dirs.
+fn save_image(img: &image::RgbaImage, path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    img.save(path)
+        .map_err(|e| format!("write {}: {e}", path.display()))
 }
 
 // ---------------------------------------------------------------------------
