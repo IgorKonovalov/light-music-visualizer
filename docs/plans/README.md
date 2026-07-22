@@ -12,9 +12,30 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | [0008](0008-preset-browse-overlay.md) | In-app preset browse overlay (standalone) | approved | Give the standalone a keyboard-driven browse overlay over the running visual: a key opens a scrollable list of preset names, arrows move a highlight, typing narrows it (type-to-filter), Enter jumps straight to that preset, Esc closes. Needs the codebase's first text rendering — **glyphon** behind a core `text` cargo feature ([ADR-0009](../adrs/0009-glyphon-text-rendering.md)), via a reusable `render::text` seam Plan 0009's HUD later shares. Adds `Renderer::preset_names`/`select_preset`; overlay logic is a pure unit-tested `OverlayState` in the shell. Standalone-only (plugin stays cycle-only), keyboard-only, C ABI untouched. The interview's chosen selection UX, split out of Plan 0007. |
 | [0009](0009-live-performance-features.md) | Live performance features (standalone) | approved | Drive a live DJ show onto a projector from the standalone: borderless-fullscreen on a chosen display, line-in / audio-interface capture (alongside loopback), self-rotating scenes (energy/drop-biased) with a manual hotkey override, experimental track-change detection (core DSP nudge), and a ≥4-hour instrumented soak. Operator choices persist in a per-user `config.toml`. Standalone-only via the native Rust API + one deterministic DSP field in core; C ABI frozen, no ADR. MIDI deferred. Roadmap item 2 (NFR §10). |
 | [0010](0010-line-geometry-scenes.md) | Line-geometry scenes: parametric curves, L-systems, star patterns | approved | Add a line-art category to the built-in system vocabulary, ported from the user's Maurer rose / L-systems / Islamic star pattern sketches. One shared `LineRenderer` (segments -> instanced quads, thick + glowing) under two build models: a cheap **parametric** system sampled per frame (the rose) and an expensive **generator** system built at preset load and cached (L-systems, star patterns). Continuous audio drives transform/hue/draw-on every frame; beat accents advance precomputed structural states. New `[curve]`/`[generator]` TOML config table + one optional `Scene::configure` hook ([ADR-0007](../adrs/0007-line-geometry-generators.md)); extends ADR-0002 layer 2. Core-only, C ABI frozen. Preset files ride Plan 0007's seeding. |
-| [0011](0011-diagnostics-and-memory-trim.md) | Diagnostics harness + quick-win memory/perf trim | approved | Build a runtime diagnostics brain in `core`: pure `FrameStats` (fps / frame-ms / p99, fed explicit deltas — clock read gated + quarantined from DSP), core-tracked GPU bytes, an on-screen overlay (frame-time sparkline + bars + a minimal bitmap-digit readout), and structured per-shell log files. Full **all-three-frontend** parity: core paints the overlay + owns the numbers; standalone reaches it via the native API (F3 toggle, own-process RSS, `diagnostics.log`); foobar reaches it over new **C ABI v3** (`lmv_set_debug` + `lmv_get_metrics` + `LmvMetrics`, [ADR-0008](../adrs/0008-c-abi-v3-diagnostics.md)). Then land the cheap NFR §12 levers — gate wgpu to DX12/Metal only, trim the swapchain — measured before/after on the iGPU box (Phase 7, human). Front-runs roadmap item 3; the adaptive-quality tier system is explicitly **not** in scope. |
 
 ## Recently closed
+
+- [0011 — Diagnostics harness + quick-win memory/perf trim](done/0011-diagnostics-and-memory-trim.md) —
+  **done 2026-07-22**, passed Mode 4 review (no blockers, no majors; two nits). Seven phase commits
+  (`7ad00df`, `166043f`, `5a9f67b`, `1ace817`, `82c7134`, `d266c08`) plus two post-review fixes
+  (`10a4796`, `894a2fc`). Built the runtime diagnostics brain in `core`: a pure `FrameStats`
+  accumulator (fps / frame-ms / p99 from a fixed 240-sample ring, unit-tested, no clock) wrapped by a
+  `Diag` holding the **single gated `Instant::now()` read** — the only wall-clock read in `core`,
+  quarantined behind `collecting` so NFR §6 determinism (fixed `SCENE_DT`) holds. A `render/overlay.rs`
+  final pass paints a frame-time sparkline + GPU bar + a dependency-free 5x7 bitmap-digit readout as
+  instanced quads (off by default, skipped when off). Standalone: F3 toggle, dependency-free per-OS RSS,
+  1 Hz rotating `diagnostics.log` on the render thread. Foobar plugin reaches the same overlay + metrics
+  over new **C ABI v3** (`lmv_set_debug` + `lmv_get_metrics` + size-guarded `LmvMetrics`,
+  [ADR-0008](../adrs/0008-c-abi-v3-diagnostics.md), now **accepted**) — the v3 FFI test rides in with a
+  `static_assert(sizeof == 56)` layout guard. Phase 6 landed the NFR §12 levers: wgpu gated to the per-OS
+  backend only (DX12/Metal, default-features off, dropping the Vulkan/GL dead weight) and an explicit
+  2-frame swapchain latency. `diag/` joined the hot-path panic-pragma guard + `hygiene.rs` scan set.
+  **⚠ Carry-forward (human):** Phase 7 — before/after RSS + fps on the older Windows iGPU box (NFR §9),
+  confirming the footprint drop toward the §12 "well under ~100 MB" target with no §1 perf-floor
+  regression. Plus the live-foobar overlay/log checks (on-device, like Plan 0004) and macOS RSS
+  (`rss.rs`, unvalidated pending a Mac — Plan 0001 carry-forward). **Nits (non-blocking):** (a)
+  `LmvMetrics.draw_calls` counts render passes, not GPU draw calls — name slightly wider than the value;
+  (b) `foo_lmv.cpp` adds a third hardcoded app-dir literal (the Plan 0007 shared-path minor, not new).
 
 - [0007 — Curated preset library: robust loading + seed-on-first-run + C ABI v2](done/0007-curated-preset-library.md) —
   **done 2026-07-22**, passed Mode 4 review (no blockers, no majors). Four phase commits
@@ -150,7 +171,7 @@ Execution order after Plan 0001, per the NFR interviews ([docs/nfr.md](../nfr.md
    (DX12/Metal), dropping the dead Vulkan/GL paths — is a cheap, low-risk win that can
    front-run the full tier system. Both validated on the older iGPU test PC (footprint stated
    before/after; the backend trim must not regress the §1 floor).
-   **Front-run by [Plan 0011](0011-diagnostics-and-memory-trim.md)** (diagnostics harness +
+   **Front-run by [Plan 0011](done/0011-diagnostics-and-memory-trim.md)** (diagnostics harness +
    the cheap NFR §12 levers, all-three-frontend, C ABI v3 / [ADR-0008](../adrs/0008-c-abi-v3-diagnostics.md)):
    it builds the before/after measuring stick and lands the wgpu-backend + swapchain trims. The
    **adaptive-quality tiers + frame-time governor remain** for a later plan — 0011 explicitly

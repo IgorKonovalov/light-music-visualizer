@@ -1,9 +1,45 @@
 # 0011 — Diagnostics harness + quick-win memory/perf trim
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-22
+> **Closed:** 2026-07-22 — passed Mode 4 review (no blockers, no majors; two nits noted below).
 > **Owner skill(s):** dev, human
-> **Related ADRs:** [0008](../adrs/0008-c-abi-v3-diagnostics.md) (C ABI v3: diagnostics query + overlay toggle)
+> **Related ADRs:** [0008](../adrs/0008-c-abi-v3-diagnostics.md) (C ABI v3: diagnostics query + overlay toggle) — **accepted** at close.
+
+## Close summary (2026-07-22)
+
+Seven phase commits landed (`7ad00df`, `166043f`, `5a9f67b`, `1ace817`, `82c7134`, `d266c08`,
+plus two post-review fixes `10a4796` + `894a2fc`). Phase 7 is a `human` carry-forward.
+
+- **Phase 1** (`7ad00df`): `core/src/diag/mod.rs` — pure `FrameStats` (fps / avg / p99 / total /
+  dropped from a fixed 240-sample ring, no clock, unit-tested) + `Diag` wrapping the single gated
+  `Instant::now()` read (quarantined behind `collecting`, the only wall-clock read in `core` —
+  verified). `Renderer::enable_diagnostics`/`metrics`; standalone title shows core-sourced fps + p99.
+- **Phase 2** (`166043f`): `render/overlay.rs` + `overlay_font.rs` — a skippable final pass drawing a
+  frame-time sparkline, GPU bar, and a dependency-free 5x7 bitmap-digit readout as instanced quads.
+- **Phase 3** (`5a9f67b`): standalone F3 toggle, dependency-free per-OS RSS (`rss.rs`), and a 1 Hz
+  rotating `diagnostics.log` (`diaglog.rs`) on the render thread — no new crate, audio path untouched.
+- **Phase 4** (`1ace817`): C ABI **v3** — `lmv_set_debug` + `lmv_get_metrics` + `#[repr(C)] LmvMetrics`
+  (size-guarded, caller-allocated), `LMV_DEBUG_OVERLAY` env seed, header in lockstep with a
+  `static_assert(sizeof == 56)`, and the first v3 FFI test (create → set_debug → get_metrics).
+- **Phase 5** (`82c7134`): foobar shim surfaces the overlay (env default + right-click toggle) and a
+  1 Hz `plugin-diagnostics.log`; handshake relaxed to `core >= built` (v3 forward-compat).
+- **Phase 6** (`d266c08`): wgpu gated to the per-OS backend only (DX12 / Metal, default-features off)
+  and an explicit `desired_maximum_frame_latency = 2` — the NFR §12 levers.
+
+**Verified at close:** `cargo test -p lmv-core` 21/21 green (incl. 4 diag + 4 FFI tests);
+`cargo clippy --workspace --all-targets -D warnings` exits 0; `diag/` is under the hot-path panic
+pragma and the `hygiene.rs` scan set; the sole `core` clock read is quarantined in `diag`.
+
+**Nits (non-blocking):** (a) `LmvMetrics.draw_calls` counts render *passes* (scene + overlay), not GPU
+draw calls — the name reads slightly wider than the value; a one-word doc tweak would remove the
+ambiguity. (b) `foo_lmv.cpp` adds a third hardcoded `\light-music-visualizer` app-dir literal — the
+same shared-path-convention minor already carried forward from Plan 0007, not new debt.
+
+**Carry-forward (human):** Phase 7 — before/after RSS + fps on the older Windows iGPU box (NFR §9),
+confirming the footprint drop toward the §12 "well under ~100 MB" target with no §1 perf-floor
+regression. Plus the standing on-device checks: the live foobar overlay toggle + log writing (like
+Plan 0004's done-whens) and macOS RSS (`rss.rs`, unvalidated pending a Mac — Plan 0001 carry-forward).
 
 ## TL;DR
 

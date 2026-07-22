@@ -1,8 +1,8 @@
 # ADR-0008 — C ABI v3: diagnostics query + debug-overlay toggle
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-22
-> **Related plan(s):** [0011](../plans/0011-diagnostics-and-memory-trim.md)
+> **Related plan(s):** [0011](../plans/0011-diagnostics-and-memory-trim.md) (implemented + closed 2026-07-22)
 
 ## Context
 
