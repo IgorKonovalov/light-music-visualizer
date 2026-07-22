@@ -53,6 +53,8 @@ const ROW_H: f32 = 30.0;
 const ROW_SIZE: f32 = 22.0;
 const ROW_COLOR: [f32; 4] = [0.72, 0.78, 0.88, 0.95];
 const ROW_HL_COLOR: [f32; 4] = [1.0, 0.88, 0.35, 1.0];
+/// The filter-echo header sits above the list; dimmer than the rows.
+const HEADER_COLOR: [f32; 4] = [0.6, 0.66, 0.76, 0.9];
 
 struct AppState {
     window: Arc<Window>,
@@ -157,6 +159,11 @@ impl AppState {
         }
         self.preset_sig = sig;
         reload_presets(&mut self.renderer, &self.preset_dir);
+        // Keep the browse overlay's highlight valid if the roster just changed
+        // shape under it (re-clamp; the open state and filter are preserved).
+        let names = self.roster_names();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        self.browse.on_roster_changed(&refs);
     }
 
     /// Drain whatever audio arrived since last frame into the analyzer.
@@ -231,21 +238,32 @@ impl AppState {
         meta.push((NAME_INSET, NAME_INSET, NAME_SIZE, NAME_COLOR));
 
         if self.browse.is_open() {
-            let names: Vec<String> = self.renderer.preset_names().map(str::to_owned).collect();
+            let names = self.roster_names();
             let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
             let visible = self.browse.visible(&name_refs);
             let highlight = self.browse.highlight();
 
+            // Header echoes the filter query (or a hint) above the list, so the
+            // user sees what they've typed as it narrows the roster.
+            let header = if self.browse.filter().is_empty() {
+                "type to filter  -  up/down  enter  esc".to_owned()
+            } else {
+                format!("filter: {}", self.browse.filter())
+            };
+            texts.push(header);
+            meta.push((LIST_INSET, LIST_TOP, ROW_SIZE, HEADER_COLOR));
+
             // A scroll window keeps the highlight on screen when the list is
-            // taller than the canvas.
+            // taller than the canvas (rows start one row below the header).
+            let rows_top = LIST_TOP + ROW_H;
             let height = self.window.inner_size().height as f32;
-            let max_rows = (((height - LIST_TOP) / ROW_H).floor() as usize).max(1);
+            let max_rows = (((height - rows_top) / ROW_H).floor() as usize).max(1);
             let scroll = highlight
                 .saturating_sub(max_rows.saturating_sub(1))
                 .min(visible.len().saturating_sub(max_rows));
 
             for (row, &(_abs, name)) in visible.iter().enumerate().skip(scroll).take(max_rows) {
-                let y = LIST_TOP + (row - scroll) as f32 * ROW_H;
+                let y = rows_top + (row - scroll) as f32 * ROW_H;
                 let (marker, color) = if row == highlight {
                     ("> ", ROW_HL_COLOR)
                 } else {
@@ -270,15 +288,20 @@ impl AppState {
         self.renderer.queue_text(&runs);
     }
 
-    /// Route a pressed key. Browse-overlay keys go through its state machine
-    /// first (and are consumed while it is open); everything else falls through
-    /// to the shell's own bindings — notably Space-cycle, which is suppressed
-    /// while the overlay is open.
-    fn handle_key(&mut self, code: KeyCode) {
+    /// Route a pressed key. Overlay control keys (toggle / nav / enter / esc /
+    /// backspace) go through its state machine first; while the overlay is open,
+    /// printable characters narrow the type-to-filter query and every other key
+    /// is swallowed. When it is closed, non-overlay keys fall through to the
+    /// shell's own bindings — Space-cycle and the F3 diagnostics toggle.
+    fn handle_key(&mut self, event: &KeyEvent) {
+        let PhysicalKey::Code(code) = event.physical_key else {
+            return;
+        };
+
         if let Some(key) = decode_overlay_key(code) {
-            let names: Vec<String> = self.renderer.preset_names().map(str::to_owned).collect();
-            let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
-            match self.browse.handle_key(key, &name_refs) {
+            let name_refs = self.roster_names();
+            let refs: Vec<&str> = name_refs.iter().map(String::as_str).collect();
+            match self.browse.handle_key(key, &refs) {
                 OverlayAction::None => return, // closed + non-toggle: let it fall away
                 OverlayAction::Redraw | OverlayAction::Close => {}
                 OverlayAction::Select(index) => {
@@ -290,14 +313,32 @@ impl AppState {
             return;
         }
 
-        match code {
-            KeyCode::Space => {
-                // Cycle only when the overlay is closed; open, keys are its own.
-                if !self.browse.is_open() {
-                    self.renderer.cycle_preset();
-                    self.update_title();
+        // While open, printable characters filter the list; anything else is
+        // consumed so it can't reach Space-cycle / F3.
+        if self.browse.is_open() {
+            if let Some(text) = &event.text {
+                let name_refs = self.roster_names();
+                let refs: Vec<&str> = name_refs.iter().map(String::as_str).collect();
+                let mut changed = false;
+                for c in text
+                    .chars()
+                    .filter(|c| !c.is_control() && !c.is_whitespace())
+                {
+                    self.browse.handle_key(OverlayKey::Char(c), &refs);
+                    changed = true;
+                }
+                if changed {
                     self.window.request_redraw();
                 }
+            }
+            return;
+        }
+
+        match code {
+            KeyCode::Space => {
+                self.renderer.cycle_preset();
+                self.update_title();
+                self.window.request_redraw();
             }
             KeyCode::F3 => {
                 self.overlay_on = !self.overlay_on;
@@ -306,6 +347,12 @@ impl AppState {
             }
             _ => {}
         }
+    }
+
+    /// The current roster names, owned — so a caller can borrow `&mut` the
+    /// renderer afterward without holding a live borrow of the preset list.
+    fn roster_names(&self) -> Vec<String> {
+        self.renderer.preset_names().map(str::to_owned).collect()
     }
 }
 
@@ -318,6 +365,7 @@ fn decode_overlay_key(code: KeyCode) -> Option<OverlayKey> {
         KeyCode::ArrowDown => OverlayKey::Down,
         KeyCode::Enter | KeyCode::NumpadEnter => OverlayKey::Enter,
         KeyCode::Escape => OverlayKey::Escape,
+        KeyCode::Backspace => OverlayKey::Backspace,
         _ => return None,
     })
 }
@@ -434,16 +482,11 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => state.redraw(),
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(code),
-                        state: ElementState::Pressed,
-                        repeat: false,
-                        ..
-                    },
-                ..
-            } => state.handle_key(code),
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed && !event.repeat =>
+            {
+                state.handle_key(&event);
+            }
             _ => {}
         }
     }
