@@ -19,6 +19,7 @@
 
 pub mod capture;
 pub mod context;
+pub mod metrics;
 pub mod overlay;
 mod overlay_font;
 pub mod scenes;
