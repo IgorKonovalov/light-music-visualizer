@@ -32,8 +32,10 @@ use scenes::Scene;
 /// Assumed bytes-per-pixel for the swapchain GPU-byte estimate (the common
 /// 8-bit RGBA/BGRA surface formats). An approximation, per ADR-0008.
 const SWAPCHAIN_BYTES_PER_PIXEL: u64 = 4;
-/// Assumed swapchain image count for the estimate until Phase 6 sets an explicit
-/// buffer count in the surface config.
+/// Fixed 2-image approximation for the swapchain GPU-byte estimate. wgpu exposes
+/// no real image count, so this stays a constant decoupled from the context's
+/// `desired_maximum_frame_latency` (also 2); the figure is a trend indicator,
+/// not an exact footprint (ADR-0008).
 const SWAPCHAIN_IMAGE_COUNT: u64 = 2;
 
 /// A preset's system to its slot in the roster built by [`scenes::create_all`].
@@ -251,7 +253,7 @@ impl Renderer {
         let aspect = ctx.config.width as f32 / ctx.config.height.max(1) as f32;
         scene.render(&ctx.queue, &mut encoder, &view, aspect);
 
-        // One scene pass, plus the overlay's instanced draw when it is enabled.
+        // One scene pass, plus the overlay's single instanced draw when enabled.
         let mut draw_calls = 1u32;
         if diag.overlay_enabled() {
             let metrics = diag.metrics();
@@ -263,7 +265,7 @@ impl Renderer {
                 metrics,
                 diag.stats().samples().map(|s| s * 1000.0),
             );
-            draw_calls += overlay.quad_count();
+            draw_calls += 1;
         }
 
         ctx.queue.submit(std::iter::once(encoder.finish()));

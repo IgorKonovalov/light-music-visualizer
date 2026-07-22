@@ -179,12 +179,6 @@ impl Overlay {
         }
     }
 
-    /// Number of quads the last [`Overlay::render`] emitted — for the renderer's
-    /// draw-call accounting (each quad is one instance in a single draw).
-    pub fn quad_count(&self) -> u32 {
-        self.quads.len().min(MAX_QUADS) as u32
-    }
-
     /// Composite the overlay over `view`. `frame_ms_samples` is the rolling
     /// frame-time history (oldest first, milliseconds) for the sparkline.
     pub fn render(
