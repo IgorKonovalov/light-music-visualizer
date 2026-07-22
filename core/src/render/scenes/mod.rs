@@ -66,13 +66,25 @@ pub(crate) fn create_all(
     device: &wgpu::Device,
     surface_format: wgpu::TextureFormat,
 ) -> Vec<Box<dyn Scene>> {
+    // One shared line renderer for every line scene (ADR-0007: "one line
+    // renderer"). A single instanced-quad pipeline + segment buffer, borrowed by
+    // whichever line scene is active — only one draws per frame. (Two separate
+    // line pipelines with byte-identical vertex layouts also mis-render on the
+    // DX12 WARP software adapter the capture tests use; one renderer avoids it.)
+    let line_renderer = std::rc::Rc::new(std::cell::RefCell::new(lines::LineRenderer::new(
+        device,
+        surface_format,
+        lines::MAX_SEGMENTS,
+        "lines",
+    )));
     vec![
         Box::new(fragment_field::FragmentFieldScene::new(
             device,
             surface_format,
         )),
         Box::new(swarm::SwarmScene::new(device, surface_format)),
-        Box::new(lines::ParametricCurveScene::new(device, surface_format)),
+        Box::new(lines::ParametricCurveScene::new(line_renderer.clone())),
+        Box::new(lines::LSystemScene::new(line_renderer.clone())),
     ]
 }
 

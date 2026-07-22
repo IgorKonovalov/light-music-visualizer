@@ -117,29 +117,34 @@ pub struct LineRenderer {
 
 impl LineRenderer {
     /// Build the pipeline and a `capacity`-segment instance buffer on `device`.
+    /// `label` names this instance's GPU resources; it must be **unique per
+    /// LineRenderer** — two line scenes coexist (parametric + generator), and
+    /// distinct labels keep their pipelines/buffers unambiguous in tooling and
+    /// captures.
     pub fn new(
         device: &wgpu::Device,
         surface_format: wgpu::TextureFormat,
         capacity: usize,
+        label: &str,
     ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("line-shader"),
+            label: Some(&format!("{label}-shader")),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
         let instances = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("line-instances"),
+            label: Some(&format!("{label}-instances")),
             size: (capacity * std::mem::size_of::<SegmentInstance>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("line-uniforms"),
+            label: Some(&format!("{label}-uniforms")),
             size: std::mem::size_of::<Uniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("line-bind-layout"),
+            label: Some(&format!("{label}-bind-layout")),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -152,7 +157,7 @@ impl LineRenderer {
             }],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("line-bind-group"),
+            label: Some(&format!("{label}-bind-group")),
             layout: &bind_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -160,12 +165,12 @@ impl LineRenderer {
             }],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("line-pipeline-layout"),
+            label: Some(&format!("{label}-pipeline-layout")),
             bind_group_layouts: &[Some(&bind_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("line-pipeline"),
+            label: Some(&format!("{label}-pipeline")),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,

@@ -1,0 +1,21 @@
+# Arrowhead - a Sierpinski arrowhead L-system (both F and G draw) that fills a
+# fractal triangle. The mids drive how deep the recursion goes; bass adds a
+# rotational kick. Symmetric and geometric, a foil to the organic fern.
+system = "lsystem"
+name   = "Arrowhead"
+
+[generator]
+axiom     = "F"
+rules     = { F = "G-F-G", G = "F+G+F" }
+angle_deg = 60
+max_depth = 6
+seed      = 1
+
+[params]
+visible_depth = "5 + floor(1 * mid)"
+rotation      = "0.3 * time + 0.2 * bass"
+hue           = "0.62 + time * 0.03 + treb * 0.25"
+draw_progress = "clamp(0.6 + bar * 0.6, 0, 1)"
+thickness     = "2.2 + mid * 1.5"
+scale         = "0.95 + bass * 0.1"
+brightness    = "0.5 + 0.5 * sin(time * 4) + clamp(mid * 0.5, 0, 0.4)"

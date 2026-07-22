@@ -71,6 +71,7 @@ fn report_family_distinctness() {
         (SystemKind::FragmentField, "fragment_field"),
         (SystemKind::Swarm, "swarm"),
         (SystemKind::ParametricCurve, "parametric_curve"),
+        (SystemKind::LSystem, "lsystem"),
     ] {
         let names: Vec<String> = default_presets()
             .into_iter()

@@ -22,9 +22,13 @@
 )]
 
 pub mod curves;
+pub mod grammar;
+pub mod lsystem;
 pub mod parametric;
 pub mod renderer;
+pub mod turtle;
 
+pub use lsystem::LSystemScene;
 pub use parametric::ParametricCurveScene;
 pub use renderer::{LineRenderer, SegmentInstance};
 
@@ -32,6 +36,12 @@ pub use renderer::{LineRenderer, SegmentInstance};
 /// (ADR-0007 Risks: ~20k). A curve's `samples` and a generator's structure are
 /// both clamped to this, and any drop is surfaced at load — never a silent cut.
 pub const MAX_SEGMENTS: usize = 20_000;
+
+/// Hard clamp on L-system iteration depth, enforced at preset load. A branching
+/// rule expands exponentially, so an unbounded `max_depth` would stall a preset
+/// switch and blow the segment cap (ADR-0007 Risks). Curated presets stay well
+/// under this; the turtle's own segment cap is the second backstop.
+pub const MAX_LSYSTEM_DEPTH: u32 = 7;
 
 /// Which parametric curve family a `[curve]` preset draws. Extend as Plan 0010's
 /// follow-ups add curve families (epicycloids, Lissajous, ...); unknown names
@@ -63,6 +73,21 @@ pub enum GeneratorConfig {
     Curve {
         /// The curve family (Maurer rose, ...).
         family: CurveFamily,
+    },
+    /// An L-system: a grammar the generator expands and turtle-walks at load,
+    /// caching one segment buffer per depth.
+    LSystem {
+        /// The starting string.
+        axiom: String,
+        /// Production rules `(predecessor, successor)`.
+        rules: Vec<(char, String)>,
+        /// Turn angle in degrees for `+`/`-`.
+        angle_deg: f32,
+        /// Iterations to precompute (`1..=max_depth`), clamped to
+        /// [`MAX_LSYSTEM_DEPTH`] at load.
+        max_depth: u32,
+        /// Reserved seed for future stochastic rules; deterministic today.
+        seed: u64,
     },
 }
 

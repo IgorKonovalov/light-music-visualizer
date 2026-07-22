@@ -14,6 +14,9 @@
     clippy::unreachable
 )]
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
 use super::{CurveFamily, GeneratorConfig, MAX_SEGMENTS, curves, palette};
@@ -46,7 +49,10 @@ const DEFAULT_DRAW_PROGRESS: f32 = 1.0;
 /// A parametric line curve (the Maurer rose), sampled per frame and driven by
 /// named preset parameters over the audio analysis.
 pub struct ParametricCurveScene {
-    renderer: LineRenderer,
+    /// The single line renderer, shared with the other line scenes (ADR-0007:
+    /// "one line renderer"). Only the active scene draws in a frame, so the
+    /// shared pipeline + buffer are never contended.
+    renderer: Rc<RefCell<LineRenderer>>,
     /// Reused segment buffer — preallocated to the cap so resampling never
     /// allocates on the hot path.
     segments: Vec<SegmentInstance>,
@@ -66,10 +72,11 @@ pub struct ParametricCurveScene {
 }
 
 impl ParametricCurveScene {
-    /// Build the line pipeline and preallocate the segment buffer on `device`.
-    pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
+    /// Build the scene over the shared line renderer, preallocating its segment
+    /// buffer to the cap.
+    pub fn new(renderer: Rc<RefCell<LineRenderer>>) -> Self {
         Self {
-            renderer: LineRenderer::new(device, surface_format, MAX_SEGMENTS),
+            renderer,
             segments: Vec::with_capacity(MAX_SEGMENTS),
             family: CurveFamily::MaurerRose,
             time: 0.0,
@@ -128,6 +135,8 @@ impl Scene for ParametricCurveScene {
         // match gains ignore-arms for them when they land.
         match cfg {
             GeneratorConfig::Curve { family } => self.family = *family,
+            // Generator configs (L-system, ...) belong to their own scenes.
+            GeneratorConfig::LSystem { .. } => {}
         }
     }
 
@@ -168,6 +177,7 @@ impl Scene for ParametricCurveScene {
     ) {
         // Segments carry brightness in their colour; glow multiplier stays 1.0.
         self.renderer
+            .borrow_mut()
             .draw(queue, encoder, view, aspect, 1.0, CLEAR, &self.segments);
     }
 }

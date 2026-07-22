@@ -13,7 +13,7 @@ use std::fmt;
 use serde::Deserialize;
 
 use super::expr::{self, Expr, ExprError};
-use crate::render::scenes::lines::{CurveFamily, GeneratorConfig};
+use crate::render::scenes::lines::{CurveFamily, GeneratorConfig, MAX_LSYSTEM_DEPTH};
 
 /// The built-in system a preset drives. Extend as Plan 0003 (and later plans)
 /// add systems; unknown names are rejected at load.
@@ -25,6 +25,8 @@ pub enum SystemKind {
     Swarm,
     /// The parametric line-curve scene (Maurer rose, ...) — ADR-0007.
     ParametricCurve,
+    /// The L-system generator scene — ADR-0007.
+    LSystem,
 }
 
 impl SystemKind {
@@ -33,6 +35,7 @@ impl SystemKind {
             "fragment_field" => SystemKind::FragmentField,
             "swarm" => SystemKind::Swarm,
             "parametric_curve" => SystemKind::ParametricCurve,
+            "lsystem" => SystemKind::LSystem,
             _ => return None,
         })
     }
@@ -81,9 +84,11 @@ impl Preset {
             params.push(Binding { name: param, expr });
         }
 
-        // Structural config: validated once here (bad family -> load error, the
-        // caller keeps the last good preset), then trusted by the scene.
-        let config = raw.curve.map(|c| c.into_config()).transpose()?;
+        // Structural config: validated once here (a bad family/grammar -> load
+        // error, the caller keeps the last good preset), then trusted by the
+        // scene. Built per system so each reads the right `[curve]`/`[generator]`
+        // table.
+        let config = build_config(system, raw.curve, raw.generator)?;
 
         Ok(Preset {
             name,
@@ -91,6 +96,27 @@ impl Preset {
             params,
             config,
         })
+    }
+}
+
+/// Assemble the optional structural config for `system` from the raw tables,
+/// validating at this boundary (ADR-0007). Non-line systems have no config.
+fn build_config(
+    system: SystemKind,
+    curve: Option<RawCurve>,
+    generator: Option<RawGenerator>,
+) -> Result<Option<GeneratorConfig>, PresetError> {
+    match system {
+        // A curve preset without a `[curve]` table accepts the family default.
+        SystemKind::ParametricCurve => curve.map(RawCurve::into_config).transpose(),
+        // A generator preset must declare its `[generator]` table.
+        SystemKind::LSystem => {
+            let g = generator.ok_or_else(|| {
+                PresetError::Config("lsystem requires a [generator] table".into())
+            })?;
+            Ok(Some(g.into_lsystem()?))
+        }
+        SystemKind::FragmentField | SystemKind::Swarm => Ok(None),
     }
 }
 
@@ -106,6 +132,10 @@ struct RawPreset {
     /// parametric-curve presets.
     #[serde(default)]
     curve: Option<RawCurve>,
+    /// The optional `[generator]` structural-config table (ADR-0007), present on
+    /// generator presets (L-system, star pattern).
+    #[serde(default)]
+    generator: Option<RawGenerator>,
 }
 
 /// The raw `[curve]` table: declarative structure for a parametric-curve scene.
@@ -123,6 +153,78 @@ impl RawCurve {
             PresetError::Config(format!("unknown curve family '{}'", self.family))
         })?;
         Ok(GeneratorConfig::Curve { family })
+    }
+}
+
+/// The raw `[generator]` table: declarative structure for a generator scene.
+/// Fields are optional at the serde layer and validated per system below, so
+/// one table shape can serve the L-system (and, later, the star pattern).
+#[derive(Deserialize)]
+struct RawGenerator {
+    /// L-system: starting string.
+    #[serde(default)]
+    axiom: Option<String>,
+    /// L-system: production rules, each key a single predecessor character.
+    #[serde(default)]
+    rules: BTreeMap<String, String>,
+    /// L-system: turn angle in degrees.
+    #[serde(default)]
+    angle_deg: Option<f32>,
+    /// L-system: iterations to precompute.
+    #[serde(default)]
+    max_depth: Option<u32>,
+    /// L-system: reserved seed (deterministic today).
+    #[serde(default)]
+    seed: Option<u64>,
+}
+
+impl RawGenerator {
+    /// Validate the table as an L-system config: a non-empty axiom, single-char
+    /// rule predecessors, a finite angle, and a depth in `1..=MAX_LSYSTEM_DEPTH`.
+    /// Every failure is a surfaced load error, never a panic (ADR-0007).
+    fn into_lsystem(self) -> Result<GeneratorConfig, PresetError> {
+        let axiom = self
+            .axiom
+            .filter(|a| !a.is_empty())
+            .ok_or_else(|| PresetError::Config("lsystem needs a non-empty axiom".into()))?;
+
+        let mut rules = Vec::with_capacity(self.rules.len());
+        for (pred, succ) in self.rules {
+            let mut chars = pred.chars();
+            let (Some(c), None) = (chars.next(), chars.next()) else {
+                return Err(PresetError::Config(format!(
+                    "lsystem rule key '{pred}' must be a single character"
+                )));
+            };
+            rules.push((c, succ));
+        }
+        if rules.is_empty() {
+            return Err(PresetError::Config(
+                "lsystem needs at least one rule".into(),
+            ));
+        }
+
+        let angle_deg = self.angle_deg.unwrap_or(25.0);
+        if !angle_deg.is_finite() {
+            return Err(PresetError::Config(
+                "lsystem angle_deg must be finite".into(),
+            ));
+        }
+
+        let max_depth = self.max_depth.unwrap_or(4);
+        if max_depth == 0 || max_depth > MAX_LSYSTEM_DEPTH {
+            return Err(PresetError::Config(format!(
+                "lsystem max_depth must be 1..={MAX_LSYSTEM_DEPTH}, got {max_depth}"
+            )));
+        }
+
+        Ok(GeneratorConfig::LSystem {
+            axiom,
+            rules,
+            angle_deg,
+            max_depth,
+            seed: self.seed.unwrap_or(0),
+        })
     }
 }
 

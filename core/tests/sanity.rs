@@ -35,7 +35,7 @@ fn coverage_floor(system: SystemKind) -> f32 {
     match system {
         SystemKind::FragmentField => 0.30,
         // Sparse line art / point swarm: a small but real footprint.
-        SystemKind::Swarm | SystemKind::ParametricCurve => 0.01,
+        SystemKind::Swarm | SystemKind::ParametricCurve | SystemKind::LSystem => 0.01,
     }
 }
 
@@ -44,6 +44,7 @@ fn system_name(system: SystemKind) -> &'static str {
         SystemKind::FragmentField => "fragment_field",
         SystemKind::Swarm => "swarm",
         SystemKind::ParametricCurve => "parametric_curve",
+        SystemKind::LSystem => "lsystem",
     }
 }
 

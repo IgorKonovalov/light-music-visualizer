@@ -170,7 +170,11 @@ fn parse_system(name: &str) -> Result<SystemKind, String> {
     match name {
         "fragment_field" => Ok(SystemKind::FragmentField),
         "swarm" => Ok(SystemKind::Swarm),
-        other => Err(format!("unknown family `{other}` (fragment_field | swarm)")),
+        "parametric_curve" => Ok(SystemKind::ParametricCurve),
+        "lsystem" => Ok(SystemKind::LSystem),
+        other => Err(format!(
+            "unknown family `{other}` (fragment_field | swarm | parametric_curve | lsystem)"
+        )),
     }
 }
 
@@ -642,7 +646,12 @@ fn report(args: Args, presets: Vec<Preset>, source: &str) -> Result<(), String> 
     let meta = preset_meta(&presets);
     let mut r = renderer(REPORT_SIZE, REPORT_SIZE, presets)?;
 
-    let families = [SystemKind::FragmentField, SystemKind::Swarm];
+    let families = [
+        SystemKind::FragmentField,
+        SystemKind::Swarm,
+        SystemKind::ParametricCurve,
+        SystemKind::LSystem,
+    ];
     let mut reports = Vec::new();
     for system in families {
         if args.family.is_some_and(|f| f != system) {
@@ -787,6 +796,8 @@ fn system_name(system: SystemKind) -> &'static str {
     match system {
         SystemKind::FragmentField => "fragment_field",
         SystemKind::Swarm => "swarm",
+        SystemKind::ParametricCurve => "parametric_curve",
+        SystemKind::LSystem => "lsystem",
     }
 }
 

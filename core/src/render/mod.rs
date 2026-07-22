@@ -55,6 +55,7 @@ fn system_slot(system: SystemKind) -> usize {
         SystemKind::FragmentField => 0,
         SystemKind::Swarm => 1,
         SystemKind::ParametricCurve => 2,
+        SystemKind::LSystem => 3,
     }
 }
 

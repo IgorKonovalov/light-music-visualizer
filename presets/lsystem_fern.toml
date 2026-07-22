@@ -1,0 +1,21 @@
+# Fern Grow - a branching plant L-system that grows an iteration deeper as the
+# bass swells (visible_depth), turns slowly on the clock, and draws itself on
+# across each beat. The signature growth scene.
+system = "lsystem"
+name   = "Fern Grow"
+
+[generator]
+axiom     = "X"
+rules     = { X = "F+[[X]-X]-F[-FX]+X", F = "FF" }
+angle_deg = 25
+max_depth = 6
+seed      = 1
+
+[params]
+visible_depth = "5 + floor(1 * bass)"
+rotation      = "0.3 * time"
+hue           = "0.3 + time * 0.03 + treb * 0.3"
+draw_progress = "clamp(0.6 + bar * 0.6, 0, 1)"
+thickness     = "2.5 + bass * 1.5"
+scale         = "0.82 + mid * 0.12 + bass * 0.18"
+brightness    = "0.5 + 0.5 * sin(time * 4) + clamp(bass * 0.4, 0, 0.4)"

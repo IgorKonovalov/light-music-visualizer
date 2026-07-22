@@ -24,6 +24,7 @@ fn system_name(system: SystemKind) -> &'static str {
         SystemKind::FragmentField => "fragment_field",
         SystemKind::Swarm => "swarm",
         SystemKind::ParametricCurve => "parametric_curve",
+        SystemKind::LSystem => "lsystem",
     }
 }
 
