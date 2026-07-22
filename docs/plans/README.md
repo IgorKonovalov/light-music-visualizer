@@ -9,12 +9,32 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0007](0007-curated-preset-library.md) | Curated preset library: robust loading + seed-on-first-run + C ABI v2 | approved | Seed a per-user preset dir (`%APPDATA%\light-music-visualizer\presets`) with an embedded curated set (~8-12 presets) on first run, then load + hot-reload it; both frontends share the dir. foobar reaches parity via one new ABI function `lmv_load_presets` (ABI v2, [ADR-0006](../adrs/0006-c-abi-v2-preset-loading.md)). Selection stays cycle + title-bar; the in-app browse overlay + text rendering is split to Plan 0008. Delivers roadmap item 1's "preset library" thread + parts of item 5's install-readiness. |
 | [0009](0009-live-performance-features.md) | Live performance features (standalone) | approved | Drive a live DJ show onto a projector from the standalone: borderless-fullscreen on a chosen display, line-in / audio-interface capture (alongside loopback), self-rotating scenes (energy/drop-biased) with a manual hotkey override, experimental track-change detection (core DSP nudge), and a ≥4-hour instrumented soak. Operator choices persist in a per-user `config.toml`. Standalone-only via the native Rust API + one deterministic DSP field in core; C ABI frozen, no ADR. MIDI deferred. Roadmap item 2 (NFR §10). |
 | [0010](0010-line-geometry-scenes.md) | Line-geometry scenes: parametric curves, L-systems, star patterns | approved | Add a line-art category to the built-in system vocabulary, ported from the user's Maurer rose / L-systems / Islamic star pattern sketches. One shared `LineRenderer` (segments -> instanced quads, thick + glowing) under two build models: a cheap **parametric** system sampled per frame (the rose) and an expensive **generator** system built at preset load and cached (L-systems, star patterns). Continuous audio drives transform/hue/draw-on every frame; beat accents advance precomputed structural states. New `[curve]`/`[generator]` TOML config table + one optional `Scene::configure` hook ([ADR-0007](../adrs/0007-line-geometry-generators.md)); extends ADR-0002 layer 2. Core-only, C ABI frozen. Preset files ride Plan 0007's seeding. |
 
 ## Recently closed
 
+- [0007 — Curated preset library: robust loading + seed-on-first-run + C ABI v2](done/0007-curated-preset-library.md) —
+  **done 2026-07-22**, passed Mode 4 review (no blockers, no majors). Four phase commits
+  (`448b54b`, `ac5e7d0`, `cf8fb5b`, `ed67807`): `core::preset::seed_dir` (write-if-absent) +
+  a hand-rolled per-OS data-root resolver in the standalone seed `%APPDATA%\light-music-visualizer\presets`
+  on first run, then load + hot-reload it; the foobar shim resolves the **same** dir and calls
+  the new `lmv_load_presets` after every `ensure_handle`, gated on an `lmv_abi_version()`
+  handshake, so both frontends share one on-disk library. The C ABI grew by exactly one
+  function and bumped to **v2** ([ADR-0006](../adrs/0006-c-abi-v2-preset-loading.md), now
+  **accepted**) — the first automated FFI test rides in with it (create -> load_presets on a
+  temp dir -> assert count + seeded + null-path error), closing the 0001/0002 zero-FFI-coverage
+  gap. Curated set expanded 4 -> 10 (calm/warp/bright fragment + drift/dense/storm swarm
+  variants). A `pending_presets` stash on `RenderState`, drained by `lmv_attach_window`, handles
+  a load-before-attach call order (matching ADR-0006's "install" intent). Selection stays cycle +
+  title-bar; the in-app browse overlay is **Plan 0008** (drafting next). Delivers roadmap item 1's
+  preset-library thread + part of item 5's install-readiness.
+  **⚠ Carry-forward (human):** (a) Phase 3 live foobar smoke — builds x64 Release against v2;
+  seeding + Next-scene cycling in a running foobar2000 is an on-device check (Plan 0001 Phase 8
+  posture). (b) Phase 4 visual quality — "visibly distinct/reactive" across the 10 presets is an
+  on-box judgment. **Minor (non-blocking):** the shared preset-path convention is a string literal
+  in both frontends (`standalone/src/main.rs`, `foo_lmv.cpp`) with no single source of truth — a
+  rename silently un-shares them; a cross-referencing comment is the follow-up.
 - [0004 — foo_lmv as an embeddable Default UI panel](done/0004-foobar-ui-element-panel.md) —
   **done 2026-07-21**, passed Mode 4 review (no blockers, no majors). All four phases landed in
   `plugin-foobar/foo_lmv.cpp` (commits `ef9193f`, `be3f90c`, `49ed225`, `855ccba`): the file-scope

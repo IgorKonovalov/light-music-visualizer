@@ -1,7 +1,7 @@
 # ADR-0006 — C ABI v2: add a preset-loading entry point
 
-> **Status:** proposed
-> **Date:** 2026-07-21
+> **Status:** accepted
+> **Date:** 2026-07-21 (accepted 2026-07-22 at Plan 0007 close)
 > **Related plan(s):** [0007](../plans/0007-curated-preset-library.md)
 
 ## Context

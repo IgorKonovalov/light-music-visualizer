@@ -1,7 +1,22 @@
 # 0007 — Curated preset library: robust loading + seed-on-first-run + C ABI v2
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-21
+> **Closed:** 2026-07-22 — passed Mode 4 review (no blockers, no majors). Four phase
+> commits landed (`448b54b` seed_dir + per-OS resolver + standalone; `ac5e7d0`
+> `lmv_load_presets` + ABI v2 + first FFI test; `cf8fb5b` foobar shim loads the shared dir
+> over v2; `ed67807` curated set expanded 4 -> 10). Verified: 21/21 `nextest` green incl.
+> the new `seed_dir` write-if-absent test and the ABI round-trip/null-path FFI test; clippy
+> `-D warnings` clean; header prototype matches `ffi.rs`; ABI grew by exactly one function
+> (v2). A `pending_presets` stash on `RenderState` (drained by `lmv_attach_window`) resolves
+> the load-before-attach ordering, matching ADR-0006's "install" intent.
+> **Carry-forward (human):** (a) Phase 3 live foobar smoke — builds x64 Release against v2;
+> seeding + Next-scene cycling in a running foobar2000 is an on-device check (Plan 0001
+> Phase 8 posture). (b) Phase 4 visual quality — the "visibly distinct/reactive" judgment
+> across the 10 presets is an on-box check. **Minor (non-blocking):** the shared preset-path
+> convention (`light-music-visualizer\presets`) is a string literal in both frontends
+> (`standalone/src/main.rs`, `foo_lmv.cpp`) with no single source of truth — a rename silently
+> un-shares them; a cross-referencing comment is the follow-up.
 > **Owner skill(s):** dev
 > **Related ADRs:** [ADR-0006](../adrs/0006-c-abi-v2-preset-loading.md) — C ABI v2 preset
 > loading (proposed by this plan; accepted at close). Builds on
