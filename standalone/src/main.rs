@@ -3,6 +3,7 @@ mod capture_mac;
 #[cfg(windows)]
 mod capture_win;
 mod diaglog;
+mod overlay;
 mod rss;
 
 use std::path::{Path, PathBuf};
@@ -13,6 +14,7 @@ use diaglog::DiagLog;
 use lmv_core::audio::{AudioFormat, SampleConsumer};
 use lmv_core::dsp::Analyzer;
 use lmv_core::render::{Renderer, TextRun};
+use overlay::{OverlayAction, OverlayKey, OverlayState};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -43,6 +45,15 @@ const NAME_INSET: f32 = 16.0;
 const NAME_SIZE: f32 = 28.0;
 const NAME_COLOR: [f32; 4] = [0.9, 0.95, 1.0, 1.0];
 
+/// Browse-overlay list layout (device px) and row colors. The list starts below
+/// the name label; each row is `ROW_H` tall; the highlighted row is brighter.
+const LIST_INSET: f32 = 16.0;
+const LIST_TOP: f32 = 64.0;
+const ROW_H: f32 = 30.0;
+const ROW_SIZE: f32 = 22.0;
+const ROW_COLOR: [f32; 4] = [0.72, 0.78, 0.88, 0.95];
+const ROW_HL_COLOR: [f32; 4] = [1.0, 0.88, 0.35, 1.0];
+
 struct AppState {
     window: Arc<Window>,
     renderer: Renderer,
@@ -54,8 +65,10 @@ struct AppState {
     occluded: bool,
     /// Frames since the last title refresh (title shows core-sourced fps + p99).
     title_tick: u32,
-    /// Whether the debug overlay is currently painted (toggled by F3).
+    /// Whether the diagnostics debug overlay is currently painted (toggled by F3).
     overlay_on: bool,
+    /// The preset browse overlay's modal state (Tab toggles; Plan 0008).
+    browse: OverlayState,
     /// ~1 Hz structured diagnostics logger (render thread only).
     diag_log: DiagLog,
     /// Preset directory watched for hot-reload, with its last-seen signature
@@ -118,6 +131,7 @@ impl AppState {
             occluded: false,
             title_tick: 0,
             overlay_on: false,
+            browse: OverlayState::new(),
             diag_log: DiagLog::new(resolve_log_path()),
             preset_dir,
             preset_sig,
@@ -172,16 +186,8 @@ impl AppState {
         self.poll_presets();
         let frame = self.analyzer.take_frame();
 
-        // Draw the active preset name on the canvas (not just the title bar).
-        // Owned first so the renderer borrow for `queue_text` is exclusive.
-        let name = self.renderer.preset_name().to_owned();
-        self.renderer.queue_text(&[TextRun {
-            text: &name,
-            x: NAME_INSET,
-            y: NAME_INSET,
-            size: NAME_SIZE,
-            color: NAME_COLOR,
-        }]);
+        // Queue the on-canvas text for this frame (active name + browse list).
+        self.queue_frame_text();
 
         if let Err(err) = self.renderer.render(&frame) {
             eprintln!("render error: {err}");
@@ -210,6 +216,110 @@ impl AppState {
             m.fps, m.frame_ms_p99
         ));
     }
+
+    /// Build this frame's on-canvas text and hand it to the renderer: always the
+    /// active preset name in the corner, plus — while the browse overlay is open
+    /// — the scrolled roster with the highlighted row distinct. Strings are
+    /// owned locally so the renderer's `queue_text` (which copies them) needs no
+    /// live borrow of the roster.
+    fn queue_frame_text(&mut self) {
+        let mut texts: Vec<String> = Vec::new();
+        // (x, y, size, color) parallel to `texts`.
+        let mut meta: Vec<(f32, f32, f32, [f32; 4])> = Vec::new();
+
+        texts.push(self.renderer.preset_name().to_owned());
+        meta.push((NAME_INSET, NAME_INSET, NAME_SIZE, NAME_COLOR));
+
+        if self.browse.is_open() {
+            let names: Vec<String> = self.renderer.preset_names().map(str::to_owned).collect();
+            let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            let visible = self.browse.visible(&name_refs);
+            let highlight = self.browse.highlight();
+
+            // A scroll window keeps the highlight on screen when the list is
+            // taller than the canvas.
+            let height = self.window.inner_size().height as f32;
+            let max_rows = (((height - LIST_TOP) / ROW_H).floor() as usize).max(1);
+            let scroll = highlight
+                .saturating_sub(max_rows.saturating_sub(1))
+                .min(visible.len().saturating_sub(max_rows));
+
+            for (row, &(_abs, name)) in visible.iter().enumerate().skip(scroll).take(max_rows) {
+                let y = LIST_TOP + (row - scroll) as f32 * ROW_H;
+                let (marker, color) = if row == highlight {
+                    ("> ", ROW_HL_COLOR)
+                } else {
+                    ("  ", ROW_COLOR)
+                };
+                texts.push(format!("{marker}{name}"));
+                meta.push((LIST_INSET, y, ROW_SIZE, color));
+            }
+        }
+
+        let runs: Vec<TextRun<'_>> = texts
+            .iter()
+            .zip(meta.iter())
+            .map(|(t, &(x, y, size, color))| TextRun {
+                text: t.as_str(),
+                x,
+                y,
+                size,
+                color,
+            })
+            .collect();
+        self.renderer.queue_text(&runs);
+    }
+
+    /// Route a pressed key. Browse-overlay keys go through its state machine
+    /// first (and are consumed while it is open); everything else falls through
+    /// to the shell's own bindings — notably Space-cycle, which is suppressed
+    /// while the overlay is open.
+    fn handle_key(&mut self, code: KeyCode) {
+        if let Some(key) = decode_overlay_key(code) {
+            let names: Vec<String> = self.renderer.preset_names().map(str::to_owned).collect();
+            let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            match self.browse.handle_key(key, &name_refs) {
+                OverlayAction::None => return, // closed + non-toggle: let it fall away
+                OverlayAction::Redraw | OverlayAction::Close => {}
+                OverlayAction::Select(index) => {
+                    self.renderer.select_preset(index);
+                    self.update_title();
+                }
+            }
+            self.window.request_redraw();
+            return;
+        }
+
+        match code {
+            KeyCode::Space => {
+                // Cycle only when the overlay is closed; open, keys are its own.
+                if !self.browse.is_open() {
+                    self.renderer.cycle_preset();
+                    self.update_title();
+                    self.window.request_redraw();
+                }
+            }
+            KeyCode::F3 => {
+                self.overlay_on = !self.overlay_on;
+                self.renderer.set_overlay(self.overlay_on);
+                self.window.request_redraw();
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Map a physical key to the overlay's abstract key, or `None` for keys the
+/// overlay does not own (which then reach the shell's own bindings).
+fn decode_overlay_key(code: KeyCode) -> Option<OverlayKey> {
+    Some(match code {
+        KeyCode::Tab => OverlayKey::Toggle,
+        KeyCode::ArrowUp => OverlayKey::Up,
+        KeyCode::ArrowDown => OverlayKey::Down,
+        KeyCode::Enter | KeyCode::NumpadEnter => OverlayKey::Enter,
+        KeyCode::Escape => OverlayKey::Escape,
+        _ => return None,
+    })
 }
 
 #[cfg(windows)]
@@ -327,31 +437,13 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
-                        physical_key: PhysicalKey::Code(KeyCode::Space),
+                        physical_key: PhysicalKey::Code(code),
                         state: ElementState::Pressed,
                         repeat: false,
                         ..
                     },
                 ..
-            } => {
-                state.renderer.cycle_preset();
-                state.update_title();
-                state.window.request_redraw();
-            }
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        physical_key: PhysicalKey::Code(KeyCode::F3),
-                        state: ElementState::Pressed,
-                        repeat: false,
-                        ..
-                    },
-                ..
-            } => {
-                state.overlay_on = !state.overlay_on;
-                state.renderer.set_overlay(state.overlay_on);
-                state.window.request_redraw();
-            }
+            } => state.handle_key(code),
             _ => {}
         }
     }
