@@ -1,6 +1,6 @@
 # 0015 — Preset-directory override + live iteration (`LMV_PRESET_DIR`, shared resolver, shot flags)
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev
 > **Related ADRs:** [0014](../adrs/0014-preset-dir-override-for-dev-iteration.md) (the override
