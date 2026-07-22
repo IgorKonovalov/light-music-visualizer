@@ -51,6 +51,13 @@ pub(crate) trait Scene {
     fn reset_params(&mut self) {}
     /// Apply one named parameter; unknown names are ignored.
     fn set_param(&mut self, _name: &str, _value: f32) {}
+
+    /// Consume a preset's declarative structural config (ADR-0007). Invoked
+    /// **once at preset load, off the hot path** — a generator builds and caches
+    /// its geometry here; a parametric scene records its family. Default no-op,
+    /// so non-line scenes (fragment field, swarm) never implement it. The one
+    /// optional widening of this trait ADR-0007 sanctions — keep it to this.
+    fn configure(&mut self, _cfg: &lines::GeneratorConfig) {}
 }
 
 /// The registry: every built-in scene, in cycling order. All scenes are

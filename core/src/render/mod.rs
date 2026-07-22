@@ -54,6 +54,7 @@ fn system_slot(system: SystemKind) -> usize {
     match system {
         SystemKind::FragmentField => 0,
         SystemKind::Swarm => 1,
+        SystemKind::ParametricCurve => 2,
     }
 }
 
@@ -163,7 +164,7 @@ impl Renderer {
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
-        Ok(Self {
+        let mut renderer = Self {
             ctx,
             scenes,
             roster: Roster::new(crate::preset::default_presets()),
@@ -172,7 +173,11 @@ impl Renderer {
             overlay,
             #[cfg(feature = "text")]
             text_layer,
-        })
+        };
+        // Apply the initial preset's structural config (ADR-0007) so a line
+        // scene at roster index 0 renders with its geometry built.
+        renderer.configure_active_scene();
+        Ok(renderer)
     }
 
     /// Build a **headless** renderer that draws into offscreen textures instead
@@ -185,7 +190,7 @@ impl Renderer {
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
-        Ok(Self {
+        let mut renderer = Self {
             ctx,
             scenes,
             roster: Roster::new(crate::preset::default_presets()),
@@ -194,7 +199,11 @@ impl Renderer {
             overlay,
             #[cfg(feature = "text")]
             text_layer,
-        })
+        };
+        // Apply the initial preset's structural config (ADR-0007) so a line
+        // scene at roster index 0 renders with its geometry built.
+        renderer.configure_active_scene();
+        Ok(renderer)
     }
 
     /// Renderer targeting a native Win32 window the host owns — the C ABI
@@ -222,7 +231,7 @@ impl Renderer {
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
-        Ok(Self {
+        let mut renderer = Self {
             ctx,
             scenes,
             roster: Roster::new(crate::preset::default_presets()),
@@ -231,7 +240,11 @@ impl Renderer {
             overlay,
             #[cfg(feature = "text")]
             text_layer,
-        })
+        };
+        // Apply the initial preset's structural config (ADR-0007) so a line
+        // scene at roster index 0 renders with its geometry built.
+        renderer.configure_active_scene();
+        Ok(renderer)
     }
 
     /// Reconfigure the surface for a new window size.
@@ -244,12 +257,14 @@ impl Renderer {
     /// files are all malformed — leaves the last good roster rendering (NFR 10).
     pub fn set_presets(&mut self, presets: Vec<Preset>) {
         self.roster.set_presets(presets);
+        self.configure_active_scene();
     }
 
     /// Switch to the next preset; returns its name. Instant — every system is
     /// built at startup, so cycling never hitches a live show.
     pub fn cycle_preset(&mut self) -> &str {
         self.roster.cycle();
+        self.configure_active_scene();
         self.preset_name()
     }
 
@@ -265,6 +280,7 @@ impl Renderer {
     /// index from a shrunk hot-reloaded roster is harmless.
     pub fn select_preset(&mut self, index: usize) -> &str {
         self.roster.select(index);
+        self.configure_active_scene();
         self.preset_name()
     }
 
@@ -326,6 +342,25 @@ impl Renderer {
             .and_then(|p| self.scenes.get(system_slot(p.system)))
             .map(|scene| scene.name())
             .unwrap_or("")
+    }
+
+    /// Apply the active preset's declarative structural config to its scene, if
+    /// it has one (ADR-0007). Called once whenever the active preset changes —
+    /// on select/cycle/hot-reload and after a capture rebuilds the scenes — so a
+    /// generator builds and caches its geometry exactly once, off the hot path.
+    /// A `None` config (fragment/swarm, or a curve on the family default) is a
+    /// no-op via the trait's default `configure`.
+    fn configure_active_scene(&mut self) {
+        let Self { scenes, roster, .. } = self;
+        let Some(preset) = roster.active_preset() else {
+            return;
+        };
+        let Some(cfg) = preset.config.as_ref() else {
+            return;
+        };
+        if let Some(scene) = scenes.get_mut(system_slot(preset.system)) {
+            scene.configure(cfg);
+        }
     }
 
     /// Draw the current preset for this analysis frame. Lost/outdated surfaces
@@ -530,6 +565,9 @@ impl Renderer {
         // differential probes (Phase 3) isolate the stimulus, not history.
         self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
         self.time = 0.0;
+        // The rebuilt scenes are fresh — re-apply the active preset's structural
+        // config (ADR-0007) so a line scene captures with its geometry built.
+        self.configure_active_scene();
 
         let (width, height) = (self.ctx.config.width, self.ctx.config.height);
         let format = self.ctx.surface_format();
@@ -587,6 +625,7 @@ impl Renderer {
 
         self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
         self.time = 0.0;
+        self.configure_active_scene();
 
         let (width, height) = (self.ctx.config.width, self.ctx.config.height);
         let target_format = self.ctx.surface_format();

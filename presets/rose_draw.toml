@@ -1,0 +1,19 @@
+# Rose Draw - a 7-petal rose (n=7/d=131) that redraws itself across each beat
+# (draw_progress rides the beat phase) and swells on the beat. Motion lives in
+# the reveal as much as the spin.
+system = "parametric_curve"
+name   = "Rose Draw"
+
+[curve]
+family = "maurer_rose"
+
+[params]
+n             = "7"
+d             = "131"
+samples       = "420"
+scale         = "0.8 + beat * 0.25 + bass * 0.2"
+spin          = "0.22 + mid * 0.3"
+hue           = "0.35 + time * 0.02 + treb * 0.3"
+thickness     = "1.6 + bass * 2"
+brightness    = "0.9 + clamp(bass * 0.5, 0, 0.5)"
+draw_progress = "clamp(0.4 + bar * 0.8, 0, 1)"

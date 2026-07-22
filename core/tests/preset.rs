@@ -188,6 +188,38 @@ fn bad_presets_are_rejected() {
     assert!(Preset::from_toml_str(bad).is_err());
     // Not even valid TOML.
     assert!(Preset::from_toml_str("system = ").is_err());
+    // A malformed [curve] structural config (unknown family) is a clean load
+    // error, not a panic — the caller keeps the last good preset (ADR-0007).
+    let bad_curve = "system = \"parametric_curve\"\n[curve]\nfamily = \"no_such_family\"\n[params]\nn = \"6\"\n";
+    assert!(
+        Preset::from_toml_str(bad_curve).is_err(),
+        "an unknown curve family must be rejected"
+    );
+}
+
+#[test]
+fn curve_config_parses_into_structural_config() {
+    use lmv_core::render::scenes::lines::{CurveFamily, GeneratorConfig};
+
+    let src = "system = \"parametric_curve\"\n\
+               name = \"Rose\"\n\
+               [curve]\n\
+               family = \"maurer_rose\"\n\
+               [params]\n\
+               n = \"6\"\nd = \"71\"\n";
+    let preset = Preset::from_toml_str(src).expect("valid curve preset");
+    assert_eq!(preset.system, SystemKind::ParametricCurve);
+    match preset.config {
+        Some(GeneratorConfig::Curve {
+            family: CurveFamily::MaurerRose,
+        }) => {}
+        other => panic!("expected a Maurer-rose curve config, got {other:?}"),
+    }
+
+    // A curve preset with no [curve] table is valid — the scene uses its family
+    // default (config stays None, so configure is a no-op).
+    let no_table = Preset::from_toml_str("system = \"parametric_curve\"").expect("valid");
+    assert!(no_table.config.is_none());
 }
 
 #[test]
@@ -198,12 +230,12 @@ fn embedded_default_presets_all_parse() {
     let presets = lmv_core::preset::default_presets();
     assert_eq!(
         presets.len(),
-        10,
+        14,
         "all shipped curated presets should compile"
     );
     assert!(
         presets.len() >= 8,
-        "the curated library is the ~8-12 hand-tuned set, not the 4 proof-of-concept files"
+        "the curated library is the ~8-14 hand-tuned set, not the 4 proof-of-concept files"
     );
 }
 

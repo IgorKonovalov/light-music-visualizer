@@ -13,6 +13,7 @@ use std::fmt;
 use serde::Deserialize;
 
 use super::expr::{self, Expr, ExprError};
+use crate::render::scenes::lines::{CurveFamily, GeneratorConfig};
 
 /// The built-in system a preset drives. Extend as Plan 0003 (and later plans)
 /// add systems; unknown names are rejected at load.
@@ -22,6 +23,8 @@ pub enum SystemKind {
     FragmentField,
     /// The CPU particle-swarm scene.
     Swarm,
+    /// The parametric line-curve scene (Maurer rose, ...) — ADR-0007.
+    ParametricCurve,
 }
 
 impl SystemKind {
@@ -29,6 +32,7 @@ impl SystemKind {
         Some(match name {
             "fragment_field" => SystemKind::FragmentField,
             "swarm" => SystemKind::Swarm,
+            "parametric_curve" => SystemKind::ParametricCurve,
             _ => return None,
         })
     }
@@ -52,6 +56,10 @@ pub struct Preset {
     pub system: SystemKind,
     /// Parameter bindings, sorted by name for deterministic iteration.
     pub params: Vec<Binding>,
+    /// Declarative structural config for a line scene (ADR-0007), applied once
+    /// at preset load via `Scene::configure`. `None` for the fragment/swarm
+    /// systems and for curve presets that accept the family default.
+    pub config: Option<GeneratorConfig>,
 }
 
 impl Preset {
@@ -73,10 +81,15 @@ impl Preset {
             params.push(Binding { name: param, expr });
         }
 
+        // Structural config: validated once here (bad family -> load error, the
+        // caller keeps the last good preset), then trusted by the scene.
+        let config = raw.curve.map(|c| c.into_config()).transpose()?;
+
         Ok(Preset {
             name,
             system,
             params,
+            config,
         })
     }
 }
@@ -89,6 +102,28 @@ struct RawPreset {
     name: Option<String>,
     #[serde(default)]
     params: BTreeMap<String, String>,
+    /// The optional `[curve]` structural-config table (ADR-0007), present on
+    /// parametric-curve presets.
+    #[serde(default)]
+    curve: Option<RawCurve>,
+}
+
+/// The raw `[curve]` table: declarative structure for a parametric-curve scene.
+#[derive(Deserialize)]
+struct RawCurve {
+    /// Curve family name (e.g. `"maurer_rose"`).
+    family: String,
+}
+
+impl RawCurve {
+    /// Validate the family name into a [`GeneratorConfig`], erroring (never
+    /// panicking) on an unknown family.
+    fn into_config(self) -> Result<GeneratorConfig, PresetError> {
+        let family = CurveFamily::from_name(&self.family).ok_or_else(|| {
+            PresetError::Config(format!("unknown curve family '{}'", self.family))
+        })?;
+        Ok(GeneratorConfig::Curve { family })
+    }
 }
 
 /// Why a preset failed to load. Every variant is recoverable — the caller
@@ -106,6 +141,9 @@ pub enum PresetError {
         /// The compile error.
         err: ExprError,
     },
+    /// A structural-config table (`[curve]`/`[generator]`) was invalid — an
+    /// unknown family, an out-of-range value, an undefined grammar symbol.
+    Config(String),
     /// The preset file could not be read (message from the I/O error).
     Io(String),
 }
@@ -118,6 +156,7 @@ impl fmt::Display for PresetError {
             PresetError::Expr { param, err } => {
                 write!(f, "parameter '{param}' has an invalid expression: {err}")
             }
+            PresetError::Config(msg) => write!(f, "invalid structural config: {msg}"),
             PresetError::Io(msg) => write!(f, "could not read preset file: {msg}"),
         }
     }

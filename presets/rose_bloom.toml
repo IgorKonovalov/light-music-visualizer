@@ -1,0 +1,18 @@
+# Rose Bloom - a warm 6-petal Maurer rose that breathes with the bass and sweeps
+# its hue with treble while slowly turning. The signature rose of the set.
+system = "parametric_curve"
+name   = "Rose Bloom"
+
+[curve]
+family = "maurer_rose"
+
+[params]
+n             = "6"
+d             = "71"
+samples       = "361"
+scale         = "0.7 + clamp(bass * 0.6, 0, 0.5)"
+spin          = "0.25 + mid * 0.4"
+hue           = "0.55 + time * 0.02 + treb * 0.3"
+thickness     = "1.8 + bass * 2.5"
+brightness    = "0.9 + clamp(bass * 0.6, 0, 0.6)"
+draw_progress = "1"

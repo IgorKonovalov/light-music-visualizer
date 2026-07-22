@@ -1,0 +1,18 @@
+# Rose Star - a 5-fold star-like rose (n=5/d=97) that flares on onsets and beats.
+# Sparser and sharper than the web; the transient-reactive rose.
+system = "parametric_curve"
+name   = "Rose Star"
+
+[curve]
+family = "maurer_rose"
+
+[params]
+n             = "5"
+d             = "97"
+samples       = "361"
+scale         = "0.75 + bass * 0.35"
+spin          = "0.28 + onset * 0.6"
+hue           = "0.72 + time * 0.02 + treb * 0.25"
+thickness     = "1.5 + onset * 3 + beat * 1.5"
+brightness    = "0.85 + clamp(onset * 0.9, 0, 0.7)"
+draw_progress = "1"

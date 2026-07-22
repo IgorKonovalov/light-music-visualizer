@@ -33,6 +33,39 @@ pub use renderer::{LineRenderer, SegmentInstance};
 /// both clamped to this, and any drop is surfaced at load — never a silent cut.
 pub const MAX_SEGMENTS: usize = 20_000;
 
+/// Which parametric curve family a `[curve]` preset draws. Extend as Plan 0010's
+/// follow-ups add curve families (epicycloids, Lissajous, ...); unknown names
+/// are rejected at load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurveFamily {
+    /// The Maurer rose — `sin(n * theta)` walked at a fixed angular step.
+    MaurerRose,
+}
+
+impl CurveFamily {
+    /// Parse a `[curve] family` name, or `None` if unknown.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "maurer_rose" => CurveFamily::MaurerRose,
+            _ => return None,
+        })
+    }
+}
+
+/// Declarative structural config a line scene consumes once at preset load
+/// (ADR-0007): **not** expressions — the family / grammar / tiling the sampler
+/// or generator builds from. Delivered through the optional
+/// [`Scene::configure`](super::Scene::configure) hook, off the hot path.
+/// Extended by later phases with the L-system and star-pattern variants.
+#[derive(Debug, Clone)]
+pub enum GeneratorConfig {
+    /// A parametric curve: which family to sample.
+    Curve {
+        /// The curve family (Maurer rose, ...).
+        family: CurveFamily,
+    },
+}
+
 /// iq-style cosine palette (RGB phase-shifted), matching the swarm/fragment
 /// scenes so line art shares the engine's colour language.
 pub fn palette(t: f32) -> [f32; 3] {

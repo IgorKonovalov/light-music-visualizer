@@ -21,7 +21,7 @@ pub use schema::{Binding, Preset, PresetError, SystemKind};
 /// The shipped example presets, embedded at compile time. These are the exact
 /// files under `presets/` at the repo root, so the embedded defaults and the
 /// on-disk hot-reload source never drift.
-const EMBEDDED: [(&str, &str); 10] = [
+const EMBEDDED: [(&str, &str); 14] = [
     (
         "fragment_aurora.toml",
         include_str!("../../../presets/fragment_aurora.toml"),
@@ -61,6 +61,22 @@ const EMBEDDED: [(&str, &str); 10] = [
     (
         "swarm_storm.toml",
         include_str!("../../../presets/swarm_storm.toml"),
+    ),
+    (
+        "rose_bloom.toml",
+        include_str!("../../../presets/rose_bloom.toml"),
+    ),
+    (
+        "rose_web.toml",
+        include_str!("../../../presets/rose_web.toml"),
+    ),
+    (
+        "rose_star.toml",
+        include_str!("../../../presets/rose_star.toml"),
+    ),
+    (
+        "rose_draw.toml",
+        include_str!("../../../presets/rose_draw.toml"),
     ),
 ];
 

@@ -1,0 +1,18 @@
+# Rose Web - a fine, dense n=2/d=39 web in cool blues, driven by the mids. Thin
+# strokes and many chords make a lattice rather than a flower.
+system = "parametric_curve"
+name   = "Rose Web"
+
+[curve]
+family = "maurer_rose"
+
+[params]
+n             = "2"
+d             = "39"
+samples       = "480"
+scale         = "0.85 + mid * 0.25"
+spin          = "0.3 + treb * 0.5"
+hue           = "0.05 + time * 0.015 + mid * 0.25"
+thickness     = "1.1 + mid * 1.8"
+brightness    = "0.8 + clamp(mid * 0.8, 0, 0.7)"
+draw_progress = "1"

@@ -16,7 +16,7 @@
 
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
-use super::{MAX_SEGMENTS, curves, palette};
+use super::{CurveFamily, GeneratorConfig, MAX_SEGMENTS, curves, palette};
 use crate::dsp::AnalysisFrame;
 
 /// Maps the `thickness` parameter (a small integer-ish stroke weight) to an
@@ -43,12 +43,15 @@ const DEFAULT_SCALE: f32 = 0.9;
 const DEFAULT_BRIGHTNESS: f32 = 1.0;
 const DEFAULT_DRAW_PROGRESS: f32 = 1.0;
 
-/// A parametric line curve (Phase 1: the Maurer rose), sampled per frame.
+/// A parametric line curve (the Maurer rose), sampled per frame and driven by
+/// named preset parameters over the audio analysis.
 pub struct ParametricCurveScene {
     renderer: LineRenderer,
     /// Reused segment buffer — preallocated to the cap so resampling never
     /// allocates on the hot path.
     segments: Vec<SegmentInstance>,
+    /// Which curve family to sample, chosen at preset load via `configure`.
+    family: CurveFamily,
     /// Shared scene clock (seconds), set by the renderer each frame.
     time: f32,
     n: f32,
@@ -68,6 +71,7 @@ impl ParametricCurveScene {
         Self {
             renderer: LineRenderer::new(device, surface_format, MAX_SEGMENTS),
             segments: Vec::with_capacity(MAX_SEGMENTS),
+            family: CurveFamily::MaurerRose,
             time: 0.0,
             n: DEFAULT_N,
             d: DEFAULT_D,
@@ -91,8 +95,45 @@ impl Scene for ParametricCurveScene {
         self.time = time;
     }
 
+    fn reset_params(&mut self) {
+        self.n = DEFAULT_N;
+        self.d = DEFAULT_D;
+        self.samples = DEFAULT_SAMPLES;
+        self.thickness = DEFAULT_THICKNESS;
+        self.hue = DEFAULT_HUE;
+        self.spin = DEFAULT_SPIN;
+        self.scale = DEFAULT_SCALE;
+        self.brightness = DEFAULT_BRIGHTNESS;
+        self.draw_progress = DEFAULT_DRAW_PROGRESS;
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) {
+        match name {
+            "n" => self.n = value,
+            "d" => self.d = value,
+            "samples" => self.samples = value,
+            "thickness" => self.thickness = value,
+            "hue" => self.hue = value,
+            "spin" => self.spin = value,
+            "scale" => self.scale = value,
+            "brightness" => self.brightness = value,
+            "draw_progress" => self.draw_progress = value,
+            _ => {}
+        }
+    }
+
+    fn configure(&mut self, cfg: &GeneratorConfig) {
+        // A curve preset records its family here (off the hot path). Later
+        // phases' generator config variants are for the generator scenes; this
+        // match gains ignore-arms for them when they land.
+        match cfg {
+            GeneratorConfig::Curve { family } => self.family = *family,
+        }
+    }
+
     fn update(&mut self, _frame: &AnalysisFrame) {
-        // Sample count clamped to the buffer cap (minus one chord's headroom).
+        // Sample count clamped to the buffer cap so a huge `samples` can never
+        // overrun the preallocated buffer (ADR-0007 cap is explicit).
         let samples = (self.samples.max(0.0) as usize).min(MAX_SEGMENTS);
         let rotation = self.spin * self.time;
         let base = palette(self.hue);
@@ -103,17 +144,19 @@ impl Scene for ParametricCurveScene {
         ];
         let width = (self.thickness * WIDTH_SCALE).max(0.0005);
 
-        curves::maurer_rose(
-            self.n,
-            self.d,
-            samples,
-            self.scale,
-            rotation,
-            self.draw_progress,
-            color,
-            width,
-            &mut self.segments,
-        );
+        match self.family {
+            CurveFamily::MaurerRose => curves::maurer_rose(
+                self.n,
+                self.d,
+                samples,
+                self.scale,
+                rotation,
+                self.draw_progress,
+                color,
+                width,
+                &mut self.segments,
+            ),
+        }
     }
 
     fn render(
