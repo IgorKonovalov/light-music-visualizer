@@ -3,7 +3,7 @@
 The one-minute "what's in flight" view. Read this first each session instead of
 re-deriving state from `git log`. Completed plans move to `done/`.
 
-**Next free number: 0013**
+**Next free number: 0015**
 
 ## Active roster
 
@@ -12,6 +12,31 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | [0008](0008-preset-browse-overlay.md) | In-app preset browse overlay (standalone) | approved | Give the standalone a keyboard-driven browse overlay over the running visual: a key opens a scrollable list of preset names, arrows move a highlight, typing narrows it (type-to-filter), Enter jumps straight to that preset, Esc closes. Needs the codebase's first text rendering — **glyphon** behind a core `text` cargo feature ([ADR-0009](../adrs/0009-glyphon-text-rendering.md)), via a reusable `render::text` seam Plan 0009's HUD later shares. Adds `Renderer::preset_names`/`select_preset`; overlay logic is a pure unit-tested `OverlayState` in the shell. Standalone-only (plugin stays cycle-only), keyboard-only, C ABI untouched. The interview's chosen selection UX, split out of Plan 0007. |
 | [0009](0009-live-performance-features.md) | Live performance features (standalone) | approved | Drive a live DJ show onto a projector from the standalone: borderless-fullscreen on a chosen display, line-in / audio-interface capture (alongside loopback), self-rotating scenes (energy/drop-biased) with a manual hotkey override, experimental track-change detection (core DSP nudge), and a ≥4-hour instrumented soak. Operator choices persist in a per-user `config.toml`. Standalone-only via the native Rust API + one deterministic DSP field in core; C ABI frozen, no ADR. MIDI deferred. Roadmap item 2 (NFR §10). |
 | [0010](0010-line-geometry-scenes.md) | Line-geometry scenes: parametric curves, L-systems, star patterns | approved | Add a line-art category to the built-in system vocabulary, ported from the user's Maurer rose / L-systems / Islamic star pattern sketches. One shared `LineRenderer` (segments -> instanced quads, thick + glowing) under two build models: a cheap **parametric** system sampled per frame (the rose) and an expensive **generator** system built at preset load and cached (L-systems, star patterns). Continuous audio drives transform/hue/draw-on every frame; beat accents advance precomputed structural states. New `[curve]`/`[generator]` TOML config table + one optional `Scene::configure` hook ([ADR-0007](../adrs/0007-line-geometry-generators.md)); extends ADR-0002 layer 2. Core-only, C ABI frozen. Preset files ride Plan 0007's seeding. |
+| [0014](0014-reaction-diffusion-feedback-scene.md) | Reaction-diffusion feedback scene + frame-rate-independent render clock | approved | The engine's first **stateful feedback** scene: a Gray-Scott reaction-diffusion simulation (evolving nested contours / cellular tissue / hatched restructuring maze) on a new reusable `render::feedback::PingPongField` (two offscreen `Rgba16Float` textures swapped each sub-step, fixed internal grid, present pass composites to the surface). Driven by a **fixed-timestep accumulator fed by real injected `dt`** so it looks identical on any device over wall-clock time — the core stays clock-free (Plan 0013 capture feeds a fixed `dt` for reproducibility). Delivering `dt` at the render seam (`Renderer::render(&frame, dt)`) lets us **converge the shared scene clock globally and retire `SCENE_DT`**, making every existing scene frame-rate-independent (resolves the standing SCENE_DT wish). Audio drives it via existing named params (ADR-0002 layer 2): bands modulate feed/kill/flow, beats stamp seeds. Adds C ABI **v4 `lmv_render_dt`** ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md), additive; `lmv_render` becomes the 1/60 wrapper) so the foobar plugin gets parity. New feedback render system per [ADR-0012](../adrs/0012-stateful-feedback-render-system.md); rejected warp-feedback advection, engine-managed multi-pass, per-frame stepping. Core + both frontends. Cross-plan dep: 0013's capture must thread a fixed `dt`. |
+| [0013](0013-headless-scene-capture.md) | Headless scene capture + differential visual QA (reactivity/beat/distinctness/sanity/animation) + golden images + shot CLI | approved | Give the agent a visual-feedback + QA harness while building shapes/geometry. A **surface-less** `RenderContext::new_headless` renders a scene into an offscreen texture and reads back raw RGBA (pure wgpu, no shipped dep); two pure primitives — `capture_preset(name, frame, N)` (constant synthetic frame) and `capture_audio(name, pcm, fmt, at[])` (feeds PCM through the **real DSP** intake→FFT→onset→tempo, source-agnostic). A dependency-free `metrics` module (mean-abs `frame_diff`, shape-aware `struct_diff`, `coverage`, `spread`) powers five axes: **per-band reactivity** (bass/mid/treb/beat probed separately), **beat** (synthetic click-track through the real analyzer → on-beat vs off-beat differs), **animation** (frame N vs N+k, catches frozen scenes), and **shape-sanity** (not blank / not a dot) land as **hard `core` tests**; **distinctness** (dual pixel+struct pairwise matrix per family, flags recolored near-duplicates) is an **advisory report** (text or hand-rolled `--json`). Plus golden-drift regression (software/WARP adapter + tolerance + `LMV_BLESS`) and a `standalone/examples/shot.rs` CLI (`--preset/--set/--frames/--out`, `--all` sheet, `--report [--json]`, `--signal`/`--audio --strip` filmstrips). Test audio is synthetic (`core::signal`, zero-dep); one short **CC0 clip is human-provided** (Phase 9). `image` is **dev-only** ([ADR-0011](../adrs/0011-image-crate-for-capture-tooling.md)); the audio path adds **no** dep (hand-rolled WAV reader). Native Rust API + dev tooling only; C ABI frozen. Overlaps Plan 0008 on `select_preset`. |
+
+## Recommended execution sequence
+
+A tactical ordering of the **active roster** (strategic themes live in the Roadmap below). One
+coupling drives it: **0014 depends on 0013's capture threading a fixed `dt`** while it retires
+`SCENE_DT`. (The earlier 0008/0013 `select_preset` overlap is already resolved — **Plan 0008 has
+landed**, so `Renderer::select_preset` exists and 0013 simply reuses it; 0013 Phase 2 no longer
+needs to add it. NB: 0008 still sits in the active roster above and needs a proper close.)
+
+1. **[0013] Capture / visual-QA harness first** — durable visual-feedback tooling: the agent can
+   render, eyeball, and hard-test any scene with no display. Reuses the existing `select_preset`
+   (landed by 0008). Unblocks building and validating every scene plan below. *Approved, ready now.*
+2. **[0010] Line-geometry scenes** — built against 0013's harness (0013 names it the prime
+   consumer: reactivity / sanity / golden tests + the `shot` gallery for the new curves,
+   L-systems, and star patterns).
+3. **[0014] Reaction-diffusion feedback + retire `SCENE_DT`** — after 0013 so the harness can test
+   the feedback scene. **0014 should own the `SCENE_DT` → injected-`dt` migration**, updating
+   0013's `capture_preset`/`capture_audio` to pass a fixed `dt`, so the change lives in one plan.
+   Adds C ABI v4 ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md)). *Approved — confirm its scope
+   updates 0013's capture primitives to the injected `dt` before dev starts either plan.*
+4. **[0009] Live performance features** — largest, standalone, independent (C ABI frozen). This is
+   Roadmap item 2 — bring it forward if the live-show milestone outranks the scene/tooling cluster
+   (user's call; the ordering above is tactical, not a re-prioritization of the roadmap).
 
 ## Standing (not a plan)
 

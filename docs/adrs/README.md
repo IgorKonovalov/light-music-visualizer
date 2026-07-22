@@ -7,7 +7,7 @@ ADR that supersedes the old one and update the status here.
 Rule of thumb: if you can't name an option you're *not* taking, you don't need an ADR —
 you need a code comment.
 
-**Next free number: 0011**
+**Next free number: 0014**
 
 | ADR  | Title                                                      | Status   |
 |------|------------------------------------------------------------|----------|
@@ -21,3 +21,6 @@ you need a code comment.
 | [0008](0008-c-abi-v3-diagnostics.md) | C ABI v3: diagnostics query (lmv_get_metrics) + debug-overlay toggle (lmv_set_debug); bump to v3 | accepted |
 | [0009](0009-glyphon-text-rendering.md) | Adopt glyphon for standalone on-canvas text (feature-gated) | proposed |
 | [0010](0010-accept-gpu-driver-memory-floor.md) | Accept the DX12/wgpu driver-stack memory floor; retarget the runtime-memory NFR (§12) | accepted |
+| [0011](0011-image-crate-for-capture-tooling.md) | Use the `image` crate (dev-dependency only) for headless-capture PNG I/O and golden compare | proposed |
+| [0012](0012-stateful-feedback-render-system.md) | Stateful feedback render system: ping-pong offscreen simulation + fixed-timestep accumulator (Gray-Scott first) | proposed |
+| [0013](0013-c-abi-v4-render-dt.md) | C ABI v4: add lmv_render_dt (injected real dt); bump to v4 | proposed |
