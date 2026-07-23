@@ -1,12 +1,13 @@
-# Ember - warm and glow-forward: mids build a steady bloom that bass swells,
-# the hue sits low (reds and oranges) drifting slowly, and warping stays gentle.
-# Bright but unhurried.
+# Ember - warm and cohesive: low zoom keeps the color in a single molten red/orange
+# band (the warm mirror of Glacier's cool), big slow blobs rather than fine cells.
+# Low warp so it smoulders; mids build a steady bloom that bass swells. Warm, dense,
+# unhurried.
 system = "fragment_field"
 name = "Ember"
 
 [params]
-warp  = "0.35 + clamp(bass * 8, 0, 1)"
-hue   = "0.05 + time * 0.01"
-zoom  = "1.0 + clamp(mid * 3, 0, 0.3)"
-glow  = "0.8 + clamp((mid + bass) * 9, 0, 1.4)"
-flash = "clamp(onset * 2, 0, 0.7)"
+warp  = "0.22 + clamp(bass * 6, 0, 0.5)"
+hue   = "0.6 + sin(time * 0.03) * 0.02"
+zoom  = "0.62 + clamp(mid * 2, 0, 0.15)"
+glow  = "0.75 + clamp((mid + bass) * 8, 0, 1.3)"
+flash = "clamp(onset * 3, 0, 0.9)"

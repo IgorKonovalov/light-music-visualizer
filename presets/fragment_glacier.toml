@@ -1,12 +1,13 @@
-# Glacier - calm and cool: a wide, slow field with barely any warp, a long zoom
-# breath on the bar phase, and a cold hue that drifts almost imperceptibly. The
-# quiet end of the fragment set.
+# Glacier - cold, vast, cohesive: zoom held LOW so only a few field cycles fill
+# the screen, which narrows the visible color to a single cool blue/azure band
+# (low zoom is the cohesion lever - high zoom smears the whole rainbow). Almost no
+# warp, a long slow breath. Dim and still - the quiet end of the fragment set.
 system = "fragment_field"
 name = "Glacier"
 
 [params]
-warp  = "0.25 + clamp(bass * 6, 0, 0.6)"
-hue   = "0.55 + time * 0.008"
-zoom  = "1.15 + bar * 0.35"
-glow  = "0.45 + clamp(mid * 5, 0, 0.7)"
-flash = "clamp(onset * 1.5, 0, 0.4)"
+warp  = "0.14 + clamp(bass * 4, 0, 0.35)"
+hue   = "0.95 + sin(time * 0.02) * 0.03"
+zoom  = "0.58 + sin(time * 0.03) * 0.05 + bar * 0.14"
+glow  = "0.42 + clamp(mid * 4, 0, 0.55)"
+flash = "clamp(onset * 1.2, 0, 0.3)"

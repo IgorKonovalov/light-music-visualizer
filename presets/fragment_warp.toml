@@ -1,12 +1,13 @@
-# Warp Drive - warp-forward and kinetic: treble tears the field into fast
-# domain-warp, each beat adds a shove, onset snaps the zoom, and the hue races.
-# The loud end of the fragment set.
+# Warp Drive - hot and kinetic: highest zoom AND highest fold, so the whole rainbow
+# churns as fast fine cells - the deliberate full-spread counterpart to Glacier/Ember.
+# Treble tears the field, a fast sin wobbles the zoom, onset snaps it, the hue races.
+# The loud, high-energy end of the fragment set.
 system = "fragment_field"
 name = "Warp Drive"
 
 [params]
-warp  = "0.6 + clamp(treb * 18, 0, 2.2) + beat * 0.4"
-hue   = "time * 0.08 + clamp(mid * 6, 0, 1)"
-zoom  = "1.05 + clamp(onset * 2, 0, 0.6)"
-glow  = "0.5 + clamp(treb * 9, 0, 1)"
-flash = "clamp(onset * 5, 0, 1)"
+warp  = "0.7 + clamp(treb * 16, 0, 2.4) + beat * 0.4"
+hue   = "0.7 + time * 0.05 + clamp(mid * 5, 0, 0.3)"
+zoom  = "1.5 + sin(time * 0.5) * 0.12 + clamp(onset * 2, 0, 0.5)"
+glow  = "0.55 + clamp(treb * 8, 0, 1.1)"
+flash = "clamp(onset * 5, 0, 1.3)"

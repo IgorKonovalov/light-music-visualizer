@@ -1,11 +1,13 @@
-# Pulse Field - tighter and beat-forward: each beat kicks the warp and every
-# onset flashes the field. Mids push the hue around.
+# Pulse Field - violet/magenta and hard on the beat: higher zoom gives a busier,
+# more multi-hued field (energetic looks earn the spread), every beat kicks the fold
+# and nudges the color, every onset throws a bright strobe. Bass drives the zoom in.
+# It reads the rhythm, not the drift.
 system = "fragment_field"
 name = "Pulse Field"
 
 [params]
-warp  = "0.5 + beat * 0.8 + clamp(bass * 10, 0, 1.2)"
-hue   = "0.5 + time * 0.02 + clamp(mid * 4, 0, 1)"
-zoom  = "1.1 + clamp(bass * 6, 0, 0.5)"
-glow  = "0.5 + clamp(mid * 10, 0, 1)"
-flash = "clamp(onset * 4, 0, 1)"
+warp  = "0.5 + beat * 0.7 + clamp(bass * 9, 0, 1.0)"
+hue   = "0.12 + beat * 0.06 + clamp(mid * 3, 0, 0.05)"
+zoom  = "1.3 + clamp(bass * 5, 0, 0.4) + beat * 0.15"
+glow  = "0.5 + clamp(mid * 9, 0, 1.0)"
+flash = "clamp(onset * 5, 0, 1.2)"

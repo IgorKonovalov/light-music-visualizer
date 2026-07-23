@@ -1,12 +1,14 @@
-# Flow - a calm swarm. Bass steers harder, mids evolve the flow field, treble
-# tints the palette, and each beat gives a small outward nudge.
+# Flow - laminar and calm: a SLOW-evolving flow field (low spin) so particles trace
+# long, coherent streamlines, mid-sized and steady. Bass firms the steering, a slow
+# sin keeps it alive when quiet, beats give a small outward nudge. The gentle,
+# readable end of the swarm set.
 system = "swarm"
 name = "Flow"
 
 [params]
-force      = "1.2 + clamp(bass * 20, 0, 4)"
-spin       = "0.3 + clamp(mid * 6, 0, 1.2)"
-burst      = "beat * 5"
-hue        = "time * 0.02 + clamp(treb * 4, 0, 1)"
-brightness = "0.6 + clamp(bass * 6, 0, 0.8)"
-size       = "1.0 + beat * 0.6"
+force      = "1.1 + sin(time * 0.1) * 0.2 + clamp(bass * 16, 0, 3)"
+spin       = "0.16 + clamp(mid * 4, 0, 0.6)"
+burst      = "beat * 4"
+hue        = "time * 0.03"
+brightness = "0.65 + clamp(bass * 6, 0, 0.8)"
+size       = "2.0 + beat * 0.5"

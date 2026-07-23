@@ -1,13 +1,13 @@
-# Storm - the aggressive swarm: hard steering, fast spin, and a big radial blast
-# on every beat over a bright, fast-shifting palette. Bass drives the force,
-# treble the color. The loud end of the swarm set.
+# Storm - aggressive and churning: hard steering over a FAST-evolving field (high
+# spin) so the flow tears and reforms, with a big radial blast on every beat plus an
+# onset kick. Bright and busy - the loud end of the swarm set.
 system = "swarm"
 name = "Storm"
 
 [params]
-force      = "2.0 + clamp(bass * 26, 0, 5)"
-spin       = "0.7 + clamp(mid * 9, 0, 1.6)"
-burst      = "beat * 11"
-hue        = "0.3 + time * 0.06 + clamp(treb * 4, 0, 1)"
-brightness = "0.8 + clamp((bass + treb) * 6, 0, 1)"
-size       = "1.1 + beat * 1.2"
+force      = "2.0 + clamp(bass * 24, 0, 5)"
+spin       = "0.75 + clamp(mid * 9, 0, 1.6)"
+burst      = "beat * 11 + clamp(onset * 4, 0, 4)"
+hue        = "0.3 + time * 0.06"
+brightness = "0.8 + clamp((bass + treb) * 6, 0, 1.1)"
+size       = "1.7 + beat * 1.2"

@@ -1,13 +1,14 @@
-# Drift - ambient swarm: gentle force, slow spin, and large soft particles that
-# ease around a slowly evolving field. Bass gives a slow breathing motion and
-# beats only nudge; no hard bursts. The quiet end of the swarm set.
+# Drift - ambient and weightless: a nearly FROZEN field with LARGE, bright, soft
+# particles and almost no burst, so the swarm stays gathered and readable instead of
+# blown to the edges. Bass gives a slow breathing motion. The quiet, spacious end -
+# and the densest-reading swarm, since big low-burst particles fill the frame.
 system = "swarm"
 name = "Drift"
 
 [params]
-force      = "0.9 + clamp(bass * 10, 0, 1.5)"
-spin       = "0.15 + clamp(mid * 2, 0, 0.3)"
-burst      = "beat * 1.5"
-hue        = "time * 0.015 + clamp(bass * 3, 0, 0.5)"
-brightness = "0.55 + clamp(bass * 4, 0, 0.6)"
-size       = "1.4 + beat * 0.4"
+force      = "0.8 + sin(time * 0.06) * 0.15 + clamp(bass * 8, 0, 1.2)"
+spin       = "0.09 + clamp(mid * 2, 0, 0.22)"
+burst      = "beat * 0.8"
+hue        = "time * 0.012"
+brightness = "0.8 + clamp(bass * 5, 0, 0.8)"
+size       = "3.2 + beat * 0.6"

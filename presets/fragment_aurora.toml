@@ -1,15 +1,13 @@
-# Aurora - a slow, flowing domain-warp field. Bass swells the warp, treble
-# drifts the hue, the bar phase gently breathes the zoom.
-#
-# Variables available to expressions: bass mid treb onset beat bar time.
-# The band values (bass/mid/treb) are raw mean magnitudes and read small, so
-# expressions apply their own gain (and clamp to stay bounded).
+# Aurora - cool cyan-green curtains that sway on their own like polar light. Medium
+# zoom for a moderate spread through the cool band (azure->green), anchored so it
+# stays out of the warm end; a slow sin sways the hue back and forth (not a monotonic
+# drift). Bass swells the fold; an independent slow sin keeps it alive when quiet.
 system = "fragment_field"
 name = "Aurora"
 
 [params]
-warp  = "0.3 + clamp(bass * 14, 0, 1.8)"
-hue   = "time * 0.03 + clamp(treb * 5, 0, 1)"
-zoom  = "1.0 + bar * 0.25"
-glow  = "0.4 + clamp((bass + mid) * 8, 0, 1.1)"
-flash = "clamp(onset * 3, 0, 1)"
+warp  = "0.42 + sin(time * 0.11) * 0.1 + clamp(bass * 9, 0, 0.7)"
+hue   = "0.15 + sin(time * 0.07) * 0.05 + clamp(treb * 3, 0, 0.05)"
+zoom  = "0.85 + sin(time * 0.05) * 0.06 + bar * 0.1"
+glow  = "0.5 + clamp((bass + mid) * 7, 0, 0.95)"
+flash = "clamp(onset * 2.5, 0, 0.8)"

@@ -1,12 +1,13 @@
-# Burst - beat-driven explosions over a faster-evolving field. Harder steering
-# and a big radial shove on every beat.
+# Burst - explosive and punctuated: mostly a quiet mid-speed swarm that DETONATES on
+# every beat - a huge radial blast plus an onset kick - and the particles swell as
+# they fly. Between beats it re-gathers. The most percussive swarm.
 system = "swarm"
 name = "Burst"
 
 [params]
-force      = "1.6 + clamp(bass * 24, 0, 5)"
-spin       = "0.5 + clamp(mid * 8, 0, 1.5)"
-burst      = "beat * 9"
-hue        = "0.4 + time * 0.05"
-brightness = "0.7 + clamp((bass + treb) * 5, 0, 1)"
-size       = "1.0 + beat * 1.0"
+force      = "1.3 + clamp(bass * 18, 0, 4)"
+spin       = "0.4 + clamp(mid * 6, 0, 1.2)"
+burst      = "beat * 10 + clamp(onset * 5, 0, 5)"
+hue        = "0.42 + time * 0.05"
+brightness = "0.65 + clamp((bass + treb) * 5, 0, 1.0)"
+size       = "1.6 + beat * 1.3"
