@@ -83,10 +83,12 @@ here; the index is one glob away and this file would only go stale.
 
 ## Ownership map
 
-Two skills. `architect` (this skill) owns `docs/` — plans, ADRs, diagrams, reviews. `dev` owns
-all code: `core/`, `standalone/`, `plugin-foobar/`. Phase owner tags use the vocabulary `dev`
-(all code) and `human` (a task only the user can do — a product call, a cert, installing a
-system audio driver). There are no sibling implementer skills.
+Three skills. `architect` (this skill) owns `docs/` — plans, ADRs, diagrams, reviews. `dev` owns
+all code: `core/`, `standalone/`, `plugin-foobar/`. `preset-author` owns preset **content** —
+`.toml` presets, expression bindings, `[curve]`/`[generator]` config — and never engine Rust
+(ADR-0017). Phase owner tags use the vocabulary `dev` (all code) and `human` (a task only the user
+can do — a product call, a cert, installing a system audio driver); preset-authoring is its own
+lane, not a phase owner. There are no sibling *implementer* skills — `dev` owns all code.
 
 ## Platform realities
 

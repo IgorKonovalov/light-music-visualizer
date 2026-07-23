@@ -24,11 +24,19 @@ Then wait. The reads below are task-grounded, not startup routines.
 
 - **`architect`** — writes plans, ADRs, diagrams, and the post-implementation review. You hand a
   plan back to it once you've finished the **last phase**.
+- **`preset-author`** — the content lane (added per [ADR-0017](../../docs/adrs/0017-preset-author-skill-lane.md)).
+  Composes engine capability into visual looks (`.toml` presets, expression bindings,
+  `[curve]`/`[generator]` config); never writes engine Rust. It touches **you** in two ways: it
+  routes engine gaps back through `architect` (a look that needs a new scene/param/function is a
+  plan for you, not a preset), and it flags a **curation candidate** — a strong preset to embed into
+  the shipped set. Embedding is *your* change (it touches the `EMBEDDED` array + its length type in
+  `core/src/preset/mod.rs` and the count assert in `core/tests/preset.rs`); the author proposes, you
+  embed.
 
-There are no sibling implementer skills — you own all code (Rust core, standalone, C++ plugin).
-So the only handoffs are `architect → you` (the user's "go" at Step 2) and `you → architect`
-(the close-ceremony prompt at Step 4). Both are manual and their value is the fresh-context
-boundary — don't try to collapse them into one session.
+You own all code (Rust core, standalone, C++ plugin) — there is no sibling *implementer* skill.
+The handoffs are `architect → you` (the user's "go" at Step 2), `you → architect` (the
+close-ceremony prompt at Step 4), and `preset-author → you` (embedding a curated preset). All are
+manual and their value is the fresh-context boundary — don't try to collapse them into one session.
 
 ## How plans ship
 

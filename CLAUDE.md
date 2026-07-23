@@ -57,25 +57,31 @@ docs/
     ├── README.md    #   Plans index: roster + next free number. Read this first each session.
     └── done/         #   Completed plans move here
 .claude/
-├── skills/          # architect (designs docs/) + dev (implements all code)
+├── skills/          # architect (designs docs/) + dev (all code) + preset-author (preset content)
 ├── settings.json    # Registers the block-broad-git-add PreToolUse hook
 └── hooks/           # block-broad-git-add.js — enforces explicit-path staging
 ```
 
 ## How we work (canonical workflow)
 
-This project runs a **two-skill** plan-driven harness (`.claude/skills/`), adapted from the
-market-analyzer repo down to just the split that matters here:
+This project runs a **three-skill** plan-driven harness (`.claude/skills/`), adapted from the
+market-analyzer repo down to just the split that matters here (the third lane, `preset-author`,
+was added per [ADR-0017](docs/adrs/0017-preset-author-skill-lane.md)):
 
-| Skill       | Owns                                             | Triggers on |
-|-------------|--------------------------------------------------|-------------|
-| `architect` | `docs/` — plans, ADRs, diagrams, reviews         | "how should we build X", "design the …", "should we A or B", "plan the …", "review plan N" |
-| `dev`       | all code — `core/`, `standalone/`, `plugin-foobar/` | "implement plan N", "do the DSP phase", "code up the …" |
+| Skill           | Owns                                             | Triggers on |
+|-----------------|--------------------------------------------------|-------------|
+| `architect`     | `docs/` — plans, ADRs, diagrams, reviews         | "how should we build X", "design the …", "should we A or B", "plan the …", "review plan N" |
+| `dev`           | all code — `core/`, `standalone/`, `plugin-foobar/` | "implement plan N", "do the DSP phase", "code up the …" |
+| `preset-author` | preset **content** — `.toml` presets, expression bindings, `[curve]`/`[generator]` config; never engine Rust | "make an aurora-style preset", "a look that pulses on the beat", "tune rose_star", "make it more organic", "design a preset for the drop" |
 
-**The hard split: `architect` designs, `dev` builds — never invert.** The architect never
-writes production code; `dev` never authors plans/ADRs and never reviews its own work. The only
-handoffs are `architect → dev` (the user's "go") and `dev → architect` (the fresh-session
-close-ceremony review). Both are manual on purpose — their value is the clean-context boundary.
+**The hard split: `architect` designs, `dev` builds, `preset-author` composes content — never
+invert.** The architect never writes production code; `dev` never authors plans/ADRs and never
+reviews its own work; `preset-author` never touches engine Rust (a look needing a new scene, param,
+or grammar capability routes back to `architect` + `dev` as feedback, and `dev` — not the author —
+embeds a preset into the shipped set). The handoffs are `architect → dev` (the user's "go"),
+`dev → architect` (the fresh-session close-ceremony review), and `preset-author → architect`/`dev`
+(engine-gap feedback, and curation of a strong preset). All are manual on purpose — their value is
+the clean-context boundary.
 
 The loop:
 

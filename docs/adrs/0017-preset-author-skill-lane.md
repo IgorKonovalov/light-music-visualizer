@@ -1,6 +1,6 @@
 # ADR-0017 — A third skill lane: `preset-author` (preset content, not engine code)
 
-> **Status:** proposed
+> **Status:** accepted (2026-07-23)
 > **Date:** 2026-07-23
 > **Related plan(s):** none yet (the skill file is authored as a user-gated step, not a `dev` plan — see Notes)
 > **Related:** [ADR-0002](0002-layered-preset-architecture.md) (the preset layers this skill authors),
@@ -124,12 +124,24 @@ thing here is an agent that authors and self-checks, not a page that explains ho
 
 ## Notes
 
-- **Acceptance trigger.** This ADR is `proposed` until the `preset-author` skill file is authored and
-  placed under `.claude/skills/preset-author/` (the user-gated step above) and CLAUDE.md's workflow
-  table + the ecosystem diagrams/skill files are updated to name the third lane. Because the
-  implementation is a single user-gated authoring act rather than a phased `dev` plan, there is no
-  paired plan to close against — flip this to `accepted` (and update `docs/adrs/README.md`) once the
-  skill exists and the docs name it.
+- **Acceptance trigger — met 2026-07-23.** This ADR was `proposed` until the `preset-author` skill
+  file was authored and placed under `.claude/skills/preset-author/` (the user-gated step above) and
+  CLAUDE.md's workflow table + the sibling `architect`/`dev` skill files' "whole ecosystem"
+  descriptions were updated to name the third lane. Both landed on 2026-07-23: the skill is
+  `.claude/skills/preset-author/SKILL.md` + five references (grammar, systems, render-loop, craft,
+  api-feedback); CLAUDE.md's table gained the third row; `architect`/`dev` name the lane. There is no
+  `docs/diagrams/` directory (the ecosystem lives in prose, not a standalone diagram), so no diagram
+  edit was needed. Because implementation was a single user-gated authoring act rather than a phased
+  `dev` plan, there is no paired plan to close against. Flipped to `accepted`.
+- **Correction to this ADR's tooling assumptions (recorded at acceptance, body left as written per
+  append-only ADRs).** Two statements in Context/Decision above are inaccurate about the *current*
+  tooling: (1) the `shot` CLI has **no** `--presets` / `--preset-file` flags, and (2) **`LMV_PRESET_DIR`
+  is not implemented** — both were assumed from Plan 0015, which has not landed. The skill's
+  render-and-verify loop therefore places a draft manually in the per-user preset dir
+  (`%APPDATA%\light-music-visualizer\presets\` on Windows) and renders via `shot --preset <name>
+  --set bass=1,... --out <png>` (a bare still is silent/dead and must have audio injected). If Plan
+  0015 lands, that loop tightens. Separately, ADR-0002's expression vocabulary mentions a `tempo`
+  variable that does not exist in code — the grammar is exactly `bass mid treb onset beat bar time`.
 - **Soft dependency on Plan 0015.** The render-and-verify loop runs today through the landed Plan
   0013 `shot` CLI (`--presets`/`--preset-file`). Plan 0015's `LMV_PRESET_DIR` + tightened hot-reload
   tightens the edit-see-live loop but does not gate the skill.

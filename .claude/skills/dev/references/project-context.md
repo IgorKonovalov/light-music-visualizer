@@ -45,9 +45,15 @@ plugin phase lands — read that phase and the plugin's README rather than guess
 - **`architect`** — all of `docs/`: plans, ADRs, diagrams, reviews.
 
 Phase owner vocabulary: **`dev`** (all code) and **`human`** (a task only the user can do — a
-product call, a signing cert, installing a system audio driver like BlackHole). There are no
-sibling implementer skills, so you never hand off to another implementer mid-plan — only back to
+product call, a signing cert, installing a system audio driver like BlackHole). There is no
+sibling *implementer* skill, so you never hand off to another implementer mid-plan — only back to
 architect at the end.
+
+A third lane, **`preset-author`** (ADR-0017), owns preset *content* (`.toml` presets, expression
+bindings, `[curve]`/`[generator]` config) and never engine Rust. It reaches you only to **embed a
+curated preset** into the shipped set — a normal `dev` change touching the `EMBEDDED` array + its
+length type in `core/src/preset/mod.rs` and the count assert in `core/tests/preset.rs`. The author
+proposes the candidate; you make the code change.
 
 ## Rules you implement against (from the architect's best-practices.md)
 
