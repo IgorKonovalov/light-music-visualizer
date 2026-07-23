@@ -1,0 +1,21 @@
+# Rose Trails - a briskly spinning Maurer rose routed through the engine feedback
+# trails (Plan 0018 Phase 6 / ADR-0018): each rotated position leaves a fading
+# light trail via the max-decay accumulation, so the flower smears into a glowing
+# spiral. The bass lengthens the trail. Reuses Plan 0014's PingPongField.
+system = "parametric_curve"
+name   = "Rose Trails"
+
+[curve]
+family = "maurer_rose"
+
+[params]
+n             = "3"
+d             = "80"
+samples       = "200"
+scale         = "0.6"
+spin          = "0.9 + mid * 0.4"
+hue           = "0.48 + time * 0.03 + treb * 0.2"
+thickness     = "1.6 + bass * 1.6"
+brightness    = "1.0"
+draw_progress = "1"
+trails        = "0.82 + clamp(bass * 0.4, 0, 0.15)"

@@ -27,6 +27,7 @@ mod overlay_font;
 pub mod scenes;
 #[cfg(feature = "text")]
 pub mod text;
+mod trails;
 
 use crate::audio::AudioFormat;
 use crate::diag::{Diag, Metrics};
@@ -42,6 +43,7 @@ pub use scenes::lines::CapOverflow;
 use text::TextLayer;
 #[cfg(feature = "text")]
 pub use text::TextRun;
+use trails::Trails;
 
 /// Assumed bytes-per-pixel for the swapchain GPU-byte estimate (the common
 /// 8-bit RGBA/BGRA surface formats). An approximation, per ADR-0008.
@@ -197,6 +199,10 @@ pub struct Renderer {
     /// backdrop before the scene draws. Driven by `bg_*` named params the renderer
     /// routes to it; owns the frame clear now that scenes `Load` instead of `Clear`.
     background: Background,
+    /// The feedback-trails stage (ADR-0018, Phase 6): wraps the composited frame in
+    /// a fade-and-accumulate feedback when a preset binds `trails > 0`; a passthrough
+    /// (direct to the surface) otherwise.
+    trails: Trails,
     /// Loaded presets + the active index (pure selection state — see [`Roster`]).
     roster: Roster,
     /// Shared scene clock (seconds), advanced one fixed step per rendered frame.
@@ -230,6 +236,7 @@ impl Renderer {
         let ctx = RenderContext::new(target, width, height)?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
         let background = Background::new(&ctx.device, ctx.surface_format());
+        let trails = Trails::new(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
@@ -237,6 +244,7 @@ impl Renderer {
             ctx,
             scenes,
             background,
+            trails,
             roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
@@ -260,6 +268,7 @@ impl Renderer {
         let ctx = RenderContext::new_headless(opts.width, opts.height, opts.prefer_software)?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
         let background = Background::new(&ctx.device, ctx.surface_format());
+        let trails = Trails::new(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
@@ -267,6 +276,7 @@ impl Renderer {
             ctx,
             scenes,
             background,
+            trails,
             roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
@@ -305,6 +315,7 @@ impl Renderer {
         let ctx = unsafe { RenderContext::new_unsafe(target, width, height) }?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
         let background = Background::new(&ctx.device, ctx.surface_format());
+        let trails = Trails::new(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
@@ -312,6 +323,7 @@ impl Renderer {
             ctx,
             scenes,
             background,
+            trails,
             roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
@@ -543,6 +555,7 @@ impl Renderer {
             ctx,
             scenes,
             background,
+            trails,
             roster,
             time,
             diag,
@@ -574,6 +587,7 @@ impl Renderer {
         scene.set_time(*time);
         scene.advance(dt);
         background.reset_params();
+        trails.reset_params();
         scene.reset_params();
         for (index, binding) in preset.params.iter().enumerate() {
             let raw = binding.expr.eval(&vars);
@@ -583,22 +597,41 @@ impl Renderer {
             // above stays pure and allocation-free.
             let tau = preset.smoothing.get(&binding.name).copied().unwrap_or(0.0);
             let value = param_smoother.smooth(index, raw, tau, dt);
-            // Route `bg_*` params to the background pass; everything else to the
-            // scene. The namespaces are disjoint, so no param reaches both.
-            if !background.set_param(&binding.name, value) {
+            // Route `bg_*` to the background pass and `trails` to the feedback
+            // stage; everything else to the scene. The namespaces are disjoint, so
+            // no param reaches more than one.
+            if !background.set_param(&binding.name, value)
+                && !trails.set_param(&binding.name, value)
+            {
                 scene.set_param(&binding.name, value);
             }
         }
         scene.update(frame);
 
-        let aspect = width as f32 / height.max(1) as f32;
-        // Fixed-order composite (ADR-0018): the backdrop first (it owns the clear),
-        // then the active scene loads over it.
-        background.render(&ctx.queue, encoder, view);
-        scene.render(&ctx.queue, encoder, view, aspect);
+        // Fixed-order composite (ADR-0018): background (owns the clear) -> scene,
+        // rendered into the trails offscreen when trails are active, else straight
+        // to the surface. When active, the feedback stage folds the composite into
+        // its accumulation and presents to the surface.
+        let surface_aspect = width as f32 / height.max(1) as f32;
+        let trailing = trails.active();
+        let (target, target_aspect) = if trailing {
+            match trails.begin(encoder) {
+                // The composite runs at the trails' fixed 16:9 internal resolution.
+                Some(offscreen) => (offscreen, Trails::aspect()),
+                None => (view, surface_aspect),
+            }
+        } else {
+            (view, surface_aspect)
+        };
+        background.render(&ctx.queue, encoder, target);
+        scene.render(&ctx.queue, encoder, target, target_aspect);
+        if trailing {
+            trails.resolve(&ctx.queue, encoder, view);
+        }
 
-        // Background + scene, plus the optional text and overlay passes below.
-        let mut draw_calls = 2u32;
+        // Background + scene (+ the trails feedback/present pair when active), plus
+        // the optional text and overlay passes below.
+        let mut draw_calls = if trailing { 4u32 } else { 2u32 };
 
         // On-canvas text (browse overlay / HUD): a second pass that loads the
         // scene and composites the queued runs on top, in the same frame
@@ -708,6 +741,7 @@ impl Renderer {
         // differential probes (Phase 3) isolate the stimulus, not history.
         self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
         self.background.reset_resources();
+        self.trails.reset_resources();
         self.time = 0.0;
         // The rebuilt scenes are fresh — re-apply the active preset's structural
         // config (ADR-0007) so a line scene captures with its geometry built.
@@ -776,6 +810,7 @@ impl Renderer {
 
         self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
         self.background.reset_resources();
+        self.trails.reset_resources();
         self.time = 0.0;
         self.configure_active_scene();
 
@@ -1209,6 +1244,41 @@ mod tests {
         assert_eq!(
             a.rgba, b.rgba,
             "smoothing state resets on rebuild -> identical recaptures"
+        );
+    }
+
+    /// Phase 6 determinism (NFR 6): a preset with `trails` (the feedback stage),
+    /// captured twice, is byte-identical — the accumulation resets on the capture
+    /// scene-rebuild, so a capture stays a pure function of its inputs even though
+    /// the trail is stateful across frames.
+    #[test]
+    fn trailed_preset_capture_is_deterministic() {
+        let Some(mut renderer) = headless_or_skip(HeadlessOptions {
+            width: 96,
+            height: 96,
+            prefer_software: true,
+        }) else {
+            return;
+        };
+        // A spinning rose with a long trail: the accumulation carries state across
+        // the warm-up frames, so a missing reset would leak between captures.
+        let trailed = Preset::from_toml_str(
+            "system = \"parametric_curve\"\nname = \"Trailed\"\n\
+             [curve]\nfamily = \"maurer_rose\"\n\
+             [params]\nn = \"3\"\nspin = \"0.9\"\nsamples = \"120\"\ntrails = \"0.8\"\n",
+        )
+        .expect("valid trailed preset");
+        renderer.set_presets(vec![trailed]);
+        let frame = AnalysisFrame::default();
+        let a = renderer
+            .capture_preset("Trailed", &frame, 20)
+            .expect("capture Trailed a");
+        let b = renderer
+            .capture_preset("Trailed", &frame, 20)
+            .expect("capture Trailed b");
+        assert_eq!(
+            a.rgba, b.rgba,
+            "trails accumulation resets on rebuild -> identical recaptures"
         );
     }
 }
