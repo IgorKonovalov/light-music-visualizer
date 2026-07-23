@@ -4,6 +4,7 @@ mod capture_mac;
 mod capture_win;
 mod config;
 mod diaglog;
+mod director;
 mod overlay;
 mod rss;
 
@@ -13,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use config::Config;
 use diaglog::DiagLog;
+use director::Director;
 use lmv_core::audio::{AudioFormat, SampleConsumer};
 use lmv_core::dsp::Analyzer;
 use lmv_core::render::{Renderer, TextRun};
@@ -37,6 +39,9 @@ const APP_TITLE: &str = concat!("light-music-visualizer ", env!("CARGO_PKG_VERSI
 const APP_DIR_NAME: &str = "light-music-visualizer";
 /// How often to re-scan the preset directory for edits.
 const PRESET_POLL: Duration = Duration::from_millis(500);
+/// Clamp the per-frame `dt` fed to the scene director. A long hidden/paused gap
+/// would otherwise dump a huge step into the dwell timer and rotate on return.
+const MAX_DT: f32 = 0.25;
 /// Refresh the window title (fps + p99) every this many rendered frames — a
 /// frame-count cadence keeps the shell clock-free for the title; the numbers
 /// themselves come from the core's diagnostics.
@@ -89,6 +94,12 @@ struct AppState {
     /// Index (into the live monitor list) of the display the operator has
     /// selected — advanced by the `D` hotkey, used when going fullscreen.
     display_index: usize,
+    /// Hands-off scene rotation policy (auto-rotate + drop bias); driven each
+    /// visible frame with the injected `dt`.
+    director: Director,
+    /// Wall-clock time of the previous rendered frame, for measuring the `dt`
+    /// fed to the director. Shell frame pacing only — core stays clock-free.
+    last_frame: Instant,
 }
 
 /// Narrow alias so the non-Windows build (no capture until Phase 9) compiles
@@ -154,6 +165,8 @@ impl AppState {
             preset_dir,
             preset_sig,
             last_preset_poll: start,
+            director: Director::from_config(&config.rotate),
+            last_frame: start,
             config,
             config_path,
             display_index,
@@ -262,11 +275,34 @@ impl AppState {
 
     fn redraw(&mut self) {
         self.pump_audio();
+
+        // Measure wall-clock dt for the scene director (shell frame pacing;
+        // core analysis stays clock-free). Update the marker even while hidden
+        // so the first visible frame after a gap gets a small, clamped dt.
+        #[allow(
+            clippy::disallowed_methods,
+            reason = "shell frame pacing: measures dt for the scene director; core analysis stays clock-free"
+        )]
+        let now = Instant::now();
+        let dt = now
+            .duration_since(self.last_frame)
+            .as_secs_f32()
+            .min(MAX_DT);
+        self.last_frame = now;
+
         if self.hidden() {
             return;
         }
         self.poll_presets();
         let frame = self.analyzer.take_frame();
+
+        // Hands-off scene rotation: the director decides from dt + this frame's
+        // energy whether to advance the preset (manual Space/A override it).
+        if self.director.advance(dt, &frame).is_some() {
+            self.renderer.cycle_preset();
+            warn_cap_overflow(&self.renderer);
+            self.update_title();
+        }
 
         // Queue the on-canvas text for this frame (active name + browse list).
         self.queue_frame_text();
@@ -293,8 +329,13 @@ impl AppState {
         let m = self.renderer.metrics();
         let preset = self.renderer.preset_name();
         let system = self.renderer.active_system_name();
+        let rotate = if self.director.auto_enabled() {
+            "auto"
+        } else {
+            "manual"
+        };
         self.window.set_title(&format!(
-            "{APP_TITLE} — {preset} [{system}] — {:.0} fps  p99 {:.1} ms",
+            "{APP_TITLE} — {preset} [{system}] {rotate} — {:.0} fps  p99 {:.1} ms",
             m.fps, m.frame_ms_p99
         ));
     }
@@ -412,8 +453,17 @@ impl AppState {
 
         match code {
             KeyCode::Space => {
+                // Manual next scene: reset the director's dwell so the auto
+                // timer restarts from this moment.
+                self.director.force_next();
                 self.renderer.cycle_preset();
                 warn_cap_overflow(&self.renderer);
+                self.update_title();
+                self.window.request_redraw();
+            }
+            KeyCode::KeyA => {
+                let on = self.director.toggle_auto();
+                eprintln!("auto-rotate {}", if on { "on" } else { "off" });
                 self.update_title();
                 self.window.request_redraw();
             }

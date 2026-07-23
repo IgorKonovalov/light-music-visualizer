@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub output: Output,
     pub input: Input,
+    pub rotate: Rotate,
 }
 
 /// `[input]` — where audio comes from: loopback of whatever is playing, or a
@@ -58,6 +59,34 @@ pub enum InputMode {
     Loopback,
     /// Capture an input device (line-in from an interface).
     LineIn,
+}
+
+/// `[rotate]` — the scene director's auto-rotate policy (Plan 0009 Phase 3).
+/// Dwell bounds are whole seconds (integers in the config, per the data shape),
+/// converted to the director's internal float clock at construction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Rotate {
+    /// Auto-rotate on the dwell timer when true; manual-only (`Space`) when off.
+    pub auto: bool,
+    /// Never rotate sooner than this many seconds after the last change.
+    pub min_dwell_secs: u32,
+    /// Always rotate by this many seconds even through a steady passage.
+    pub max_dwell_secs: u32,
+    /// Let the experimental track-change novelty signal nudge rotation (wired in
+    /// Phase 4). On by default but clearly experimental.
+    pub track_change: bool,
+}
+
+impl Default for Rotate {
+    fn default() -> Self {
+        Self {
+            auto: true,
+            min_dwell_secs: 8,
+            max_dwell_secs: 40,
+            track_change: true,
+        }
+    }
 }
 
 /// `[output]` — which display, and whether to open borderless-fullscreen on it.
