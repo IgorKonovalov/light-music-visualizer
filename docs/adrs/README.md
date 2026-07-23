@@ -7,12 +7,12 @@ ADR that supersedes the old one and update the status here.
 Rule of thumb: if you can't name an option you're *not* taking, you don't need an ADR —
 you need a code comment.
 
-**Next free number: 0020**
+**Next free number: 0021**
 
 | ADR  | Title                                                      | Status   |
 |------|------------------------------------------------------------|----------|
 | [0001](0001-rust-core-wgpu-cabi-foobar-shim.md) | Rust core, wgpu rendering, C ABI with a C++ foobar shim | accepted |
-| [0002](0002-layered-preset-architecture.md) | Layered preset architecture: data + expressions + optional script | accepted |
+| [0002](0002-layered-preset-architecture.md) | Layered preset architecture: data + expressions + optional script | accepted (supplemented by 0020) |
 | [0003](0003-c-abi-v1-surface.md) | C ABI v1 surface (eight functions; frozen shape + rationale) | accepted (extended by 0006, 0008) |
 | [0004](0004-living-behavioral-spec-layer.md) | Living behavioral-spec layer: seed two contracts, no gate/ritual yet | accepted |
 | [0005](0005-versioning-and-release-cadence.md) | App versioning: SemVer 0.x, one workspace version, cargo-release at plan close | accepted |
@@ -30,3 +30,4 @@ you need a code comment.
 | [0017](0017-preset-author-skill-lane.md) | A third skill lane: `preset-author` (preset content, not engine code); two-skill harness becomes three | accepted |
 | [0018](0018-engine-wide-scene-compositing.md) | Engine-wide scene compositing: shared view transform + background pre-pass + feedback trails + screen-space post-effects (fixed order, not a render graph) | proposed |
 | [0019](0019-eased-parameters.md) | Eased (smoothed) parameters: render-layer one-pole filtering on injected `dt`; expression layer stays pure | proposed |
+| [0020](0020-preset-grammar-v2-branching-functions-tempo.md) | Preset expression grammar v2: branching (compares + `select`), math functions, `tempo` variable, soft typo warnings (supplements 0002) | proposed |
