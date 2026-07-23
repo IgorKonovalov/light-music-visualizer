@@ -314,7 +314,7 @@ impl AppState {
         // Queue the on-canvas text for this frame (active name + browse list).
         self.queue_frame_text();
 
-        if let Err(err) = self.renderer.render(&frame) {
+        if let Err(err) = self.renderer.render(&frame, dt) {
             eprintln!("render error: {err}");
         }
         self.title_tick += 1;

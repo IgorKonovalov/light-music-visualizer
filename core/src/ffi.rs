@@ -297,7 +297,10 @@ pub unsafe extern "C" fn lmv_render(handle: *mut LmvHandle) -> i32 {
             state.analyzer.push_interleaved(&state.scratch[..n]);
         }
         let frame = state.analyzer.take_frame();
-        match renderer.render(&frame) {
+        // Legacy fixed 1/60 s step (Plan 0014 Phase 2). ABI v4 adds
+        // `lmv_render_dt` for host-measured real time (Phase 5); this entry then
+        // becomes its exact 1/60 wrapper.
+        match renderer.render(&frame, 1.0 / 60.0) {
             Ok(()) => LMV_OK,
             Err(_) => LMV_ERR_RENDER,
         }

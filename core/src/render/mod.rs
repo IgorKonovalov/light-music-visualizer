@@ -392,11 +392,14 @@ impl Renderer {
         self.cap_overflow.as_ref()
     }
 
-    /// Draw the current preset for this analysis frame. Lost/outdated surfaces
+    /// Draw the current preset for this analysis frame, advancing all animation
+    /// by `dt` real seconds (Plan 0014 Phase 2). The frontend measures and
+    /// injects elapsed wall-clock time so the visuals run at the same speed on
+    /// any refresh rate; `core` never reads a clock. Lost/outdated surfaces
     /// self-heal by reconfiguring; timeouts/occlusion skip the frame; only a
     /// validation failure (a bug) bubbles up.
-    pub fn render(&mut self, frame: &AnalysisFrame) -> Result<(), RenderError> {
-        self.time += scenes::SCENE_DT;
+    pub fn render(&mut self, frame: &AnalysisFrame, dt: f32) -> Result<(), RenderError> {
+        self.time += dt;
 
         // Core-tracked GPU footprint: the swapchain dominates what the core
         // allocates. An approximation (ADR-0008), refreshed each frame so it
@@ -423,7 +426,7 @@ impl Renderer {
             });
 
         let (width, height) = (self.ctx.config.width, self.ctx.config.height);
-        let draw_calls = self.draw_frame(frame, &mut encoder, &view, width, height);
+        let draw_calls = self.draw_frame(frame, &mut encoder, &view, width, height, dt);
 
         self.ctx.queue.submit(std::iter::once(encoder.finish()));
         self.ctx.queue.present(surface_tex);
@@ -442,8 +445,10 @@ impl Renderer {
     /// by the on-surface present path and headless capture; the caller owns
     /// acquire/submit/present (or the offscreen copy-back). Evaluates the active
     /// preset into the active system using the current scene clock
-    /// (`self.time`, advanced by the caller — this does not touch it). Returns
-    /// the draw-call count.
+    /// (`self.time`, advanced by the caller — this does not touch it) and
+    /// injects `dt` real seconds into the scene's [`advance`](scenes::Scene::advance)
+    /// so its simulation steps at the same wall-clock rate on any refresh.
+    /// Returns the draw-call count.
     fn draw_frame(
         &mut self,
         frame: &AnalysisFrame,
@@ -451,6 +456,7 @@ impl Renderer {
         view: &wgpu::TextureView,
         width: u32,
         height: u32,
+        dt: f32,
     ) -> u32 {
         let Self {
             ctx,
@@ -483,6 +489,7 @@ impl Renderer {
             *time,
         );
         scene.set_time(*time);
+        scene.advance(dt);
         scene.reset_params();
         for binding in &preset.params {
             scene.set_param(&binding.name, binding.expr.eval(&vars));
@@ -545,7 +552,7 @@ impl Renderer {
     /// offscreen texture, returning tight RGBA (Plan 0013). Off the hot path —
     /// blocks on GPU readback; never call it from a live loop.
     pub fn capture_frame(&mut self, frame: &AnalysisFrame) -> Result<CaptureImage, RenderError> {
-        self.time += scenes::SCENE_DT;
+        self.time += scenes::FALLBACK_DT;
         self.capture_at_clock(frame)
     }
 
@@ -565,7 +572,14 @@ impl Renderer {
                 label: Some("lmv-capture-frame"),
             });
         capture::record_clear(&mut encoder, &view);
-        let _ = self.draw_frame(frame, &mut encoder, &view, width, height);
+        let _ = self.draw_frame(
+            frame,
+            &mut encoder,
+            &view,
+            width,
+            height,
+            scenes::FALLBACK_DT,
+        );
         capture::record_copy(&mut encoder, &texture, &buffer, padded_bpr, width, height);
         self.ctx.queue.submit(std::iter::once(encoder.finish()));
 
@@ -608,10 +622,10 @@ impl Renderer {
         // discarded); then capture the final frame.
         let n = frames.max(1);
         for _ in 1..n {
-            self.time += scenes::SCENE_DT;
-            self.step_offscreen(frame, &view, width, height);
+            self.time += scenes::FALLBACK_DT;
+            self.step_offscreen(frame, &view, width, height, scenes::FALLBACK_DT);
         }
-        self.time += scenes::SCENE_DT;
+        self.time += scenes::FALLBACK_DT;
 
         let (buffer, padded_bpr) = capture::create_readback(&self.ctx.device, width, height);
         let mut encoder = self
@@ -621,7 +635,14 @@ impl Renderer {
                 label: Some("lmv-capture-preset"),
             });
         capture::record_clear(&mut encoder, &view);
-        let _ = self.draw_frame(frame, &mut encoder, &view, width, height);
+        let _ = self.draw_frame(
+            frame,
+            &mut encoder,
+            &view,
+            width,
+            height,
+            scenes::FALLBACK_DT,
+        );
         capture::record_copy(&mut encoder, &texture, &buffer, padded_bpr, width, height);
         self.ctx.queue.submit(std::iter::once(encoder.finish()));
 
@@ -670,7 +691,7 @@ impl Renderer {
             let frame_index = index as u32;
             analyzer.push_interleaved(hop);
             let analysis = analyzer.take_frame();
-            self.time += scenes::SCENE_DT;
+            self.time += scenes::FALLBACK_DT;
 
             let wanted = at_frames.contains(&frame_index)
                 && !captured.iter().any(|(i, _)| *i == frame_index);
@@ -684,7 +705,14 @@ impl Renderer {
                             label: Some("lmv-capture-audio"),
                         });
                 capture::record_clear(&mut encoder, &view);
-                let _ = self.draw_frame(&analysis, &mut encoder, &view, width, height);
+                let _ = self.draw_frame(
+                    &analysis,
+                    &mut encoder,
+                    &view,
+                    width,
+                    height,
+                    scenes::FALLBACK_DT,
+                );
                 capture::record_copy(&mut encoder, &texture, &buffer, padded_bpr, width, height);
                 self.ctx.queue.submit(std::iter::once(encoder.finish()));
                 #[cfg(feature = "text")]
@@ -692,7 +720,7 @@ impl Renderer {
                 let img = capture::read_back(&self.ctx.device, &buffer, width, height, padded_bpr)?;
                 captured.push((frame_index, img));
             } else {
-                self.step_offscreen(&analysis, &view, width, height);
+                self.step_offscreen(&analysis, &view, width, height, scenes::FALLBACK_DT);
             }
         }
 
@@ -717,6 +745,7 @@ impl Renderer {
         view: &wgpu::TextureView,
         width: u32,
         height: u32,
+        dt: f32,
     ) {
         let mut encoder = self
             .ctx
@@ -725,7 +754,7 @@ impl Renderer {
                 label: Some("lmv-capture-step"),
             });
         capture::record_clear(&mut encoder, view);
-        let _ = self.draw_frame(frame, &mut encoder, view, width, height);
+        let _ = self.draw_frame(frame, &mut encoder, view, width, height, dt);
         self.ctx.queue.submit(std::iter::once(encoder.finish()));
 
         #[cfg(feature = "text")]

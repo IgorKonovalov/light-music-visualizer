@@ -44,10 +44,17 @@ use crate::render::feedback::PingPongField;
 /// 512² only as an example).
 const GRID: u32 = 256;
 
-/// Gray-Scott sub-steps encoded per frame in Phase 1 (temporary — Phase 2's
-/// fixed-timestep accumulator replaces this constant count). Several stabilizing
-/// sub-steps per frame are needed for the pattern to evolve at a visible rate.
-const SIM_SUBSTEPS: u32 = 12;
+/// Wall-clock duration of one Gray-Scott sub-step (Plan 0014 Phase 2). The
+/// fixed-timestep accumulator runs one sub-step per `FIXED_STEP` of injected
+/// real `dt`, so the simulation evolves at the same rate on any refresh — at the
+/// live/​capture `dt` of 1/60 s this is 12 sub-steps per frame.
+const FIXED_STEP: f32 = 1.0 / 720.0;
+
+/// Max sub-steps encoded in a single frame. A long stall would otherwise queue
+/// unbounded work (accumulator spiral-of-death); past this the accumulator's
+/// backlog is dropped, so the sim briefly slows rather than diverging (ADR-0012).
+/// 40 covers a ~55 ms hitch before it bites.
+const MAX_SUBSTEPS: u32 = 40;
 
 /// Seeded initial-scatter blobs, and the uniform array's capacity.
 const SEED_BLOBS: usize = 30;
@@ -346,6 +353,11 @@ pub struct ReactionDiffusionScene {
     /// (re)build so a rebuilt scene restarts identically (capture determinism).
     init_params: InitParams,
     needs_seed: bool,
+    /// Fixed-timestep accumulator: unspent injected `dt`, drained one
+    /// [`FIXED_STEP`] at a time in [`advance`](Scene::advance).
+    accumulator: f32,
+    /// Sub-steps `advance` scheduled for the next `render` to encode.
+    pending_substeps: u32,
     /// Shared scene clock (seconds), set by the renderer each frame.
     time: f32,
     feed: f32,
@@ -378,6 +390,8 @@ impl ReactionDiffusionScene {
             res: None,
             init_params,
             needs_seed: true,
+            accumulator: 0.0,
+            pending_substeps: 0,
             time: 0.0,
             feed: DEFAULT_FEED,
             kill: DEFAULT_KILL,
@@ -554,6 +568,21 @@ impl Scene for ReactionDiffusionScene {
         "reaction diffusion"
     }
 
+    fn advance(&mut self, dt: f32) {
+        // Drain the accumulator one fixed sub-step at a time, clamped so a long
+        // stall can't queue unbounded work (ADR-0012). The sub-`FIXED_STEP`
+        // remainder carries to the next frame; a clamp drops the excess backlog
+        // so the sim slows rather than races to catch up.
+        self.accumulator += dt;
+        let mut steps = 0u32;
+        while self.accumulator >= FIXED_STEP && steps < MAX_SUBSTEPS {
+            self.accumulator -= FIXED_STEP;
+            steps += 1;
+        }
+        self.accumulator = self.accumulator.min(FIXED_STEP);
+        self.pending_substeps = steps;
+    }
+
     fn set_time(&mut self, time: f32) {
         self.time = time;
     }
@@ -596,6 +625,7 @@ impl Scene for ReactionDiffusionScene {
             res,
             init_params,
             needs_seed,
+            pending_substeps,
             feed,
             kill,
             diffuse_u,
@@ -621,9 +651,9 @@ impl Scene for ReactionDiffusionScene {
             *needs_seed = false;
         }
 
-        // Fixed sub-step count (Phase 1). Each step reads the current field and
-        // writes the other texture, then the field swaps.
-        for _ in 0..SIM_SUBSTEPS {
+        // Run the sub-steps the accumulator scheduled this frame (Phase 2). Each
+        // reads the current field and writes the other texture, then swaps.
+        for _ in 0..*pending_substeps {
             let sim_bg = if res.field.reading_a() {
                 &res.sim_bg_a
             } else {

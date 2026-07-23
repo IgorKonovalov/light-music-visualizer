@@ -22,9 +22,13 @@ pub mod swarm;
 
 use crate::dsp::AnalysisFrame;
 
-/// Fixed per-frame timestep for scene animation. Frame-rate coupled by
-/// design in the fixed-quality MVP; the quality-tier plan revisits this.
-pub(crate) const SCENE_DT: f32 = 1.0 / 60.0;
+/// The `dt` (seconds) the C ABI's legacy `lmv_render` and the headless capture
+/// primitives inject when a caller has no real elapsed time to supply — the
+/// former fixed scene step, now demoted to a fallback (Plan 0014 Phase 2, ADR-0012).
+/// The live frontends measure and inject real `dt` instead, so animation is
+/// frame-rate-independent; capture uses this fixed value so a render is a pure
+/// function of its inputs.
+pub(crate) const FALLBACK_DT: f32 = 1.0 / 60.0;
 
 /// One visual. `update` advances state from the analysis frame; `render` draws
 /// with the state it has.
@@ -43,6 +47,13 @@ pub(crate) trait Scene {
         view: &wgpu::TextureView,
         aspect: f32,
     );
+
+    /// Advance simulation state by `dt` real seconds (Plan 0014 Phase 2). The
+    /// renderer injects the elapsed time each frame; a feedback scene steps its
+    /// fixed-timestep accumulator here and a CPU-integrated scene (the swarm)
+    /// scales its motion by `dt`, so both look identical over wall-clock time on
+    /// any refresh rate. Stateless, purely `time`-driven scenes ignore it.
+    fn advance(&mut self, _dt: f32) {}
 
     /// Set the shared scene clock (seconds). The renderer owns the single clock
     /// so an expression's `time` and the system's animation never diverge.

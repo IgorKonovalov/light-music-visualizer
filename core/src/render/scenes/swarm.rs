@@ -18,7 +18,7 @@
     clippy::unreachable
 )]
 
-use super::{SCENE_DT, Scene, SeededRng};
+use super::{FALLBACK_DT, Scene, SeededRng};
 use crate::dsp::AnalysisFrame;
 
 /// Particle count. 10k is the target look (Plan 0003); it holds the primary
@@ -120,6 +120,11 @@ pub struct SwarmScene {
     instance_data: Vec<Instance>,
     /// Shared scene clock (seconds), set by the renderer each frame.
     time: f32,
+    /// Real elapsed seconds for this frame's integration (Plan 0014 Phase 2),
+    /// injected via `advance` so the swarm moves at the same wall-clock rate on
+    /// any refresh. Seeded to the fallback step for the first frame before any
+    /// `advance` call.
+    dt: f32,
     force: f32,
     spin: f32,
     burst: f32,
@@ -233,6 +238,7 @@ impl SwarmScene {
                 PARTICLES
             ],
             time: 0.0,
+            dt: FALLBACK_DT,
             force: DEFAULT_FORCE,
             spin: DEFAULT_SPIN,
             burst: DEFAULT_BURST,
@@ -274,6 +280,10 @@ impl Scene for SwarmScene {
         "swarm"
     }
 
+    fn advance(&mut self, dt: f32) {
+        self.dt = dt;
+    }
+
     fn set_time(&mut self, time: f32) {
         self.time = time;
     }
@@ -309,24 +319,33 @@ impl Scene for SwarmScene {
         let force = self.force;
         let burst_kick = self.burst;
 
+        // Frame-rate-independent integration (Plan 0014 Phase 2): scale the
+        // acceleration/advection by real `dt`, and raise the per-frame damping to
+        // the `dt`-relative power so the velocity decays at the same wall-clock
+        // rate regardless of refresh (one `powf` per frame, not per particle).
+        // At `dt == FALLBACK_DT` (1/60) this reduces to the former fixed step, so
+        // the look is unchanged live and byte-identical under fixed-`dt` capture.
+        let dt = self.dt;
+        let damp = DAMPING.powf(dt * 60.0);
+
         for (p, inst) in self.particles.iter_mut().zip(self.instance_data.iter_mut()) {
             // Scalar potential -> flow direction (cheap curl-ish field).
             let a = (p.pos[0] * FIELD_FREQ + field_t).sin()
                 + (p.pos[1] * FIELD_FREQ - field_t * 0.8).cos();
             let dir = [a.cos(), a.sin()];
 
-            p.vel[0] = p.vel[0] * DAMPING + dir[0] * force * SCENE_DT;
-            p.vel[1] = p.vel[1] * DAMPING + dir[1] * force * SCENE_DT;
+            p.vel[0] = p.vel[0] * damp + dir[0] * force * dt;
+            p.vel[1] = p.vel[1] * damp + dir[1] * force * dt;
 
             // Beat burst pushes particles radially outward from center.
             if burst_kick > 0.0 {
                 let r = (p.pos[0] * p.pos[0] + p.pos[1] * p.pos[1]).sqrt().max(1e-3);
-                p.vel[0] += p.pos[0] / r * burst_kick * SCENE_DT;
-                p.vel[1] += p.pos[1] / r * burst_kick * SCENE_DT;
+                p.vel[0] += p.pos[0] / r * burst_kick * dt;
+                p.vel[1] += p.pos[1] / r * burst_kick * dt;
             }
 
-            p.pos[0] += p.vel[0] * SCENE_DT;
-            p.pos[1] += p.vel[1] * SCENE_DT;
+            p.pos[0] += p.vel[0] * dt;
+            p.pos[1] += p.vel[1] * dt;
 
             // Toroidal wrap keeps the field populated (no respawns/hitches).
             if p.pos[0] > BOUND_X {
