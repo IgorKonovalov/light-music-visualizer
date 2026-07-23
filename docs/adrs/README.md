@@ -7,7 +7,7 @@ ADR that supersedes the old one and update the status here.
 Rule of thumb: if you can't name an option you're *not* taking, you don't need an ADR —
 you need a code comment.
 
-**Next free number: 0021**
+**Next free number: 0022**
 
 | ADR  | Title                                                      | Status   |
 |------|------------------------------------------------------------|----------|
@@ -31,3 +31,4 @@ you need a code comment.
 | [0018](0018-engine-wide-scene-compositing.md) | Engine-wide scene compositing: shared view transform + background pre-pass + feedback trails + screen-space post-effects (fixed order, not a render graph) | proposed |
 | [0019](0019-eased-parameters.md) | Eased (smoothed) parameters: render-layer one-pole filtering on injected `dt`; expression layer stays pure | proposed |
 | [0020](0020-preset-grammar-v2-branching-functions-tempo.md) | Preset expression grammar v2: branching (compares + `select`), math functions, `tempo` variable, soft typo warnings (supplements 0002) | proposed |
+| [0021](0021-shared-palette-system.md) | Shared preset-controllable palette system: baked gradient LUT (named + custom stops), bindable color modulation + A/B crossfade (supplements 0002) | proposed |
