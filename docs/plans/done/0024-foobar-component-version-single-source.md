@@ -1,9 +1,34 @@
 # 0024 — Single-source the foobar component version + refresh stale plugin descriptions
 
-> **Status:** approved
+> **Status:** done
 > **Created:** 2026-07-23
+> **Closed:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0025-foobar-component-version-single-sourced](../adrs/0025-foobar-component-version-single-sourced.md); supplements [ADR-0005](../adrs/0005-versioning-and-release-cadence.md); revises the "plugin version remains independent" note from [Plan 0006](done/0006-versioning-wiring.md)
+
+## Close summary (2026-07-23)
+
+Landed in two `dev` commits — `08df308` (Phase 1: `build.ps1` reads `[workspace.package].version`
+from root `Cargo.toml` and generates `build/foo_lmv_version.h`; `foo_lmv.cpp` includes it guarded
+with a `0.0.0-dev` fallback and feeds `FOO_LMV_VERSION` to `DECLARE_COMPONENT_VERSION`) and
+`a8effb9` (Phase 2: refreshed both stale scene-description strings). Passed Mode 4 review cold —
+**no blockers, no majors, no minors** (one nit below). Verified: the `Cargo.toml` regex
+`\[workspace\.package\][^\[]*?\bversion\s*=\s*"([^"]+)"` is anchored to the `[workspace.package]`
+section (the `[^\[]` class can't cross a section header, so a member/profile `version` can never
+match; the intervening `version.workspace = true` comment can't match either — no `= ` follows
+`version` there) and `throw`s on a miss; `/I "$build"` is on the `cl` line (build.ps1:79) so the
+generated header resolves; the header is gitignored (`git check-ignore` confirms) and untracked
+(`git ls-files plugin-foobar/build/` empty); **no `0.1.0` literal remains** and neither the
+`DECLARE_COMPONENT_VERSION` blurb nor `lmv_ui_element::get_description` mentions
+spectrum/pulse/starfield (grep clean) — both now name the current families (fragment fields,
+particle swarm, line geometry, reaction-diffusion, attractors). ADR-0025 honored: component
+version = workspace version, `LMV_ABI_VERSION` untouched (no ffi/header change in either commit).
+On-device confirmation that foobar's Components list shows the current version is a user check
+(the plugin can't run headlessly) — surfaced, not gated. **Nit:** `Set-Content -Encoding ascii`
+for the header is correct for the ASCII SemVer strings we emit. Version bumped **patch
+0.7.0 → 0.7.1** at close (a build-wiring + doc-string fix, no core feature) — which, by the
+single-sourcing this plan shipped, is exactly the number the plugin's Components list will now
+display on its next `build.ps1` run.
 
 ## TL;DR
 
