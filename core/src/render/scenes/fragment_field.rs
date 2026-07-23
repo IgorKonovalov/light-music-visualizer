@@ -27,6 +27,10 @@ const DEFAULT_HUE: f32 = 0.0;
 const DEFAULT_ZOOM: f32 = 1.0;
 const DEFAULT_GLOW: f32 = 0.7;
 const DEFAULT_FLASH: f32 = 0.0;
+// Shared view transform (ADR-0018): `pan_*` offset the sampled field window. The
+// field's existing `zoom` already scales the sample coordinates (its view-zoom in
+// field space), so Phase 2 completes the ViewTransform here by adding pan.
+const DEFAULT_PAN: f32 = 0.0;
 
 const SHADER: &str = r#"
 struct Params {
@@ -34,6 +38,8 @@ struct Params {
     a: vec4<f32>,
     // x: zoom, y: glow, z: flash, w: unused
     b: vec4<f32>,
+    // xy: pan (field-space offset, ADR-0018), zw: unused
+    c: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -73,12 +79,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let zoom = params.b.x;
     let glow = params.b.y;
     let flash = params.b.z;
+    let pan = params.c.xy;
 
     var uv = in.ndc;
     uv.x = uv.x * aspect;
 
-    // Iterated sine-fold domain warp, scaled by zoom and folded by warp.
-    var p = uv * zoom;
+    // Iterated sine-fold domain warp, scaled by zoom and folded by warp; `pan`
+    // slides the sampled field window (the shared ViewTransform, ADR-0018). The
+    // vignette below stays screen-anchored (uses unshifted `uv`).
+    var p = uv * zoom + pan;
     for (var i = 0; i < 5; i = i + 1) {
         let fi = f32(i);
         p = p + warp * vec2<f32>(
@@ -103,6 +112,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 struct Params {
     a: [f32; 4],
     b: [f32; 4],
+    c: [f32; 4],
 }
 
 /// Fullscreen domain-warped fragment field, driven by named preset parameters.
@@ -117,6 +127,8 @@ pub struct FragmentFieldScene {
     zoom: f32,
     glow: f32,
     flash: f32,
+    pan_x: f32,
+    pan_y: f32,
 }
 
 impl FragmentFieldScene {
@@ -194,6 +206,8 @@ impl FragmentFieldScene {
             zoom: DEFAULT_ZOOM,
             glow: DEFAULT_GLOW,
             flash: DEFAULT_FLASH,
+            pan_x: DEFAULT_PAN,
+            pan_y: DEFAULT_PAN,
         }
     }
 }
@@ -213,6 +227,8 @@ impl Scene for FragmentFieldScene {
         self.zoom = DEFAULT_ZOOM;
         self.glow = DEFAULT_GLOW;
         self.flash = DEFAULT_FLASH;
+        self.pan_x = DEFAULT_PAN;
+        self.pan_y = DEFAULT_PAN;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
@@ -222,6 +238,8 @@ impl Scene for FragmentFieldScene {
             "zoom" => self.zoom = value,
             "glow" => self.glow = value,
             "flash" => self.flash = value,
+            "pan_x" => self.pan_x = value,
+            "pan_y" => self.pan_y = value,
             _ => {}
         }
     }
@@ -241,6 +259,7 @@ impl Scene for FragmentFieldScene {
         let params = Params {
             a: [self.time, aspect.max(0.1), self.warp, self.hue],
             b: [self.zoom, self.glow, self.flash, 0.0],
+            c: [self.pan_x, self.pan_y, 0.0, 0.0],
         };
         queue.write_buffer(&self.uniforms, 0, bytemuck::bytes_of(&params));
 

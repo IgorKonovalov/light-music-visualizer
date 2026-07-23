@@ -43,10 +43,15 @@ const DEFAULT_BURST: f32 = 0.0;
 const DEFAULT_HUE: f32 = 0.0;
 const DEFAULT_BRIGHTNESS: f32 = 0.8;
 const DEFAULT_SIZE: f32 = 1.0;
+// Shared view transform (ADR-0018): identity by default, so an unbound preset is
+// unchanged. `zoom` multiplies particle positions about the frame centre; `pan_*`
+// offset them — matching the line scenes' semantics (zoom > 1 = zoomed in).
+const DEFAULT_ZOOM: f32 = 1.0;
+const DEFAULT_PAN: f32 = 0.0;
 
 const SHADER: &str = r#"
 struct Misc {
-    // x: aspect, yzw: unused
+    // x: aspect, y: zoom, zw: pan (the shared ViewTransform, ADR-0018)
     v: vec4<f32>,
 }
 
@@ -70,7 +75,12 @@ fn vs_main(
         vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0),
     );
     let c = corners[vi] * 2.0 - vec2<f32>(1.0, 1.0);
-    let world = center + c * size;
+    // Shared ViewTransform (ADR-0018): zoom about the frame centre, then pan the
+    // particle position; the sprite quad (c * size) keeps its on-screen size.
+    let zoom = misc.v.y;
+    let pan = misc.v.zw;
+    let center_v = center * zoom + pan;
+    let world = center_v + c * size;
     var out: VsOut;
     out.pos = vec4<f32>(world.x / misc.v.x, world.y, 0.0, 1.0);
     out.local = c;
@@ -131,6 +141,9 @@ pub struct SwarmScene {
     hue: f32,
     brightness: f32,
     size: f32,
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
 }
 
 impl SwarmScene {
@@ -245,6 +258,9 @@ impl SwarmScene {
             hue: DEFAULT_HUE,
             brightness: DEFAULT_BRIGHTNESS,
             size: DEFAULT_SIZE,
+            zoom: DEFAULT_ZOOM,
+            pan_x: DEFAULT_PAN,
+            pan_y: DEFAULT_PAN,
         }
     }
 
@@ -295,6 +311,9 @@ impl Scene for SwarmScene {
         self.hue = DEFAULT_HUE;
         self.brightness = DEFAULT_BRIGHTNESS;
         self.size = DEFAULT_SIZE;
+        self.zoom = DEFAULT_ZOOM;
+        self.pan_x = DEFAULT_PAN;
+        self.pan_y = DEFAULT_PAN;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
@@ -305,6 +324,9 @@ impl Scene for SwarmScene {
             "hue" => self.hue = value,
             "brightness" => self.brightness = value,
             "size" => self.size = value,
+            "zoom" => self.zoom = value,
+            "pan_x" => self.pan_x = value,
+            "pan_y" => self.pan_y = value,
             _ => {}
         }
     }
@@ -387,7 +409,7 @@ impl Scene for SwarmScene {
             &self.uniforms,
             0,
             bytemuck::bytes_of(&Misc {
-                v: [aspect.max(0.1), 0.0, 0.0, 0.0],
+                v: [aspect.max(0.1), self.zoom, self.pan_x, self.pan_y],
             }),
         );
 
