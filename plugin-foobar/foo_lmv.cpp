@@ -28,11 +28,22 @@
 
 #include "lmv_core.h"
 
+// Component version, single-sourced from the workspace Cargo version (ADR-0025).
+// build.ps1 generates foo_lmv_version.h into build/ (on the include path) from
+// root Cargo.toml's [workspace.package] version; the fallback keeps a compile
+// outside build.ps1 (editor tooling, a stray direct cl) building as 0.0.0-dev.
+#if __has_include("foo_lmv_version.h")
+#  include "foo_lmv_version.h"
+#endif
+#ifndef FOO_LMV_VERSION
+#  define FOO_LMV_VERSION "0.0.0-dev"
+#endif
+
 // foobar2000 x64 uses 64-bit audio_sample; lmv-core takes f32, so chunks are
 // converted through a fixed buffer on the way in (see push_converted).
 
 DECLARE_COMPONENT_VERSION(
-    "Light Music Visualizer", "0.1.0",
+    "Light Music Visualizer", FOO_LMV_VERSION,
     "Light Music Visualizer\n"
     "Spectrum, pulse and starfield scenes rendered by the shared lmv-core "
     "Rust engine (wgpu).\n"

@@ -48,6 +48,20 @@ foreach ($proj in $sdkProjects) {
 
 # --- 4. Compile + link the shim ---
 New-Item -ItemType Directory -Force $build | Out-Null
+
+# Single-source the component version (ADR-0025): read the workspace version
+# from root Cargo.toml - anchored to the [workspace.package] section so a
+# member-crate or profile version can never match - and emit the header
+# foo_lmv.cpp includes. The header lands in build/ (gitignored); never committed.
+$cargoToml = Get-Content -Raw (Join-Path $repo "Cargo.toml")
+if ($cargoToml -notmatch '\[workspace\.package\][^\[]*?\bversion\s*=\s*"([^"]+)"') {
+    throw "could not parse [workspace.package] version from Cargo.toml"
+}
+$version = $Matches[1]
+Set-Content -Path (Join-Path $build "foo_lmv_version.h") -Encoding ascii `
+    -Value "#define FOO_LMV_VERSION `"$version`""
+Write-Host "version: $version -> $build\foo_lmv_version.h"
+
 $libs = @(
     (Join-Path $sdk "foobar2000\SDK\x64\Release\foobar2000_SDK.lib"),
     (Join-Path $sdk "foobar2000\foobar2000_component_client\x64\Release\foobar2000_component_client.lib"),
@@ -62,7 +76,7 @@ $libs = @(
 )
 $libArgs = ($libs | ForEach-Object { "`"$_`"" }) -join " "
 $cl = "cl /nologo /std:c++17 /EHsc /MD /O2 /W3 /DNDEBUG /DUNICODE /D_UNICODE " +
-    "/I `"$sdk`" /I `"$sdk\foobar2000`" /I `"$repo\core\include`" " +
+    "/I `"$sdk`" /I `"$sdk\foobar2000`" /I `"$repo\core\include`" /I `"$build`" " +
     "/Fo`"$build\\`" `"$root\foo_lmv.cpp`" " +
     "/link /DLL /OUT:`"$build\foo_lmv.dll`" $libArgs"
 cmd /c "`"$vcvars`" >nul && $cl"
