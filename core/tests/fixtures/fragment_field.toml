@@ -1,0 +1,12 @@
+# GOLDEN FIXTURE - do not tune; editing this invalidates the drift baseline (ADR-0023)
+# Minimal fragment_field with constant params: a folded cool-band field, catchable
+# by the drift guard but never in need of content tuning.
+system = "fragment_field"
+name   = "fixture_fragment_field"
+
+[params]
+warp  = "0.5"
+hue   = "0.15"
+zoom  = "0.9"
+glow  = "0.7"
+flash = "0.2"

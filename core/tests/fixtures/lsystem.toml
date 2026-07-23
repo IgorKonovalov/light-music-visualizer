@@ -1,0 +1,21 @@
+# GOLDEN FIXTURE - do not tune; editing this invalidates the drift baseline (ADR-0023)
+# Minimal L-system: a fixed-depth branching plant, fully drawn (draw_progress = 1)
+# and unrotated, so the turtle-walked geometry is a stable drift target.
+system = "lsystem"
+name   = "fixture_lsystem"
+
+[generator]
+axiom     = "X"
+rules     = { X = "F+[[X]-X]-F[-FX]+X", F = "FF" }
+angle_deg = 25
+max_depth = 5
+seed      = 1
+
+[params]
+visible_depth = "5"
+rotation      = "0"
+hue           = "0.3"
+draw_progress = "1"
+thickness     = "2.5"
+scale         = "0.82"
+brightness    = "0.9"

@@ -1,0 +1,13 @@
+# GOLDEN FIXTURE - do not tune; editing this invalidates the drift baseline (ADR-0023)
+# Minimal swarm with constant params. The particle sim is seeded (NFR 6), so a
+# constant-driven capture reproduces exactly.
+system = "swarm"
+name   = "fixture_swarm"
+
+[params]
+force      = "0.8"
+spin       = "0.1"
+burst      = "0.3"
+hue        = "0.6"
+brightness = "0.9"
+size       = "3.0"

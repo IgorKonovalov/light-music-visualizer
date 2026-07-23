@@ -1,0 +1,18 @@
+# GOLDEN FIXTURE - do not tune; editing this invalidates the drift baseline (ADR-0023)
+# Minimal Hankin star: a static 12-fold rosette, fully drawn and unrotated, so
+# the generated star geometry is a stable drift target.
+system = "star_pattern"
+name   = "fixture_star_pattern"
+
+[generator]
+tiling            = "12"
+contact_angle_deg = 35
+
+[params]
+variant       = "0"
+rotation      = "0"
+hue           = "0.5"
+draw_progress = "1"
+thickness     = "4"
+scale         = "0.9"
+brightness    = "0.9"

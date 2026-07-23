@@ -11,41 +11,56 @@
 use std::path::{Path, PathBuf};
 
 use lmv_core::dsp::AnalysisFrame;
+use lmv_core::preset::{Preset, SystemKind};
 use lmv_core::render::{CaptureImage, HeadlessOptions, RenderError, Renderer, metrics::frame_diff};
 
 const SIZE: u32 = 128;
+/// Frames warmed before capture — enough for the stateful systems (swarm sim,
+/// reaction-diffusion field) to evolve a non-trivial pattern.
+const FRAMES: u32 = 60;
 /// Mean per-channel difference (0..1) a fresh render may drift from baseline.
 const MEAN_TOL: f32 = 0.02;
 /// Largest single-channel byte difference tolerated at any pixel — a localized
 /// change a low mean would otherwise hide.
 const MAX_OUTLIER: u8 = 48;
 
-struct Case {
-    /// Baseline file stem under `tests/golden/`.
-    file: &'static str,
-    /// Preset name in the default roster.
-    preset: &'static str,
-    frames: u32,
-}
-
-/// A small matrix spanning both systems (two fragment_field, one swarm).
-const CASES: &[Case] = &[
-    Case {
-        file: "aurora",
-        preset: "Aurora",
-        frames: 60,
-    },
-    Case {
-        file: "warp",
-        preset: "Warp Drive",
-        frames: 60,
-    },
-    Case {
-        file: "drift",
-        preset: "Drift",
-        frames: 60,
-    },
+/// Every `SystemKind` the drift guard must cover. Iterating this list drives the
+/// test; the exhaustive `match` in [`fixture`] is what forces a new variant to
+/// add its fixture before the test compiles.
+const SYSTEMS: &[SystemKind] = &[
+    SystemKind::FragmentField,
+    SystemKind::Swarm,
+    SystemKind::ParametricCurve,
+    SystemKind::LSystem,
+    SystemKind::StarPattern,
+    SystemKind::ReactionDiffusion,
 ];
+
+/// The frozen fixture for a system: its baseline file stem (the system name) and
+/// the fixture TOML compiled into the test binary.
+///
+/// This is an **exhaustive** `match` with no wildcard arm — adding a
+/// `SystemKind` variant fails to compile here until a fixture is authored under
+/// `tests/fixtures/`, so no scene ships without a drift baseline (ADR-0023).
+fn fixture(system: SystemKind) -> (&'static str, &'static str) {
+    match system {
+        SystemKind::FragmentField => (
+            "fragment_field",
+            include_str!("fixtures/fragment_field.toml"),
+        ),
+        SystemKind::Swarm => ("swarm", include_str!("fixtures/swarm.toml")),
+        SystemKind::ParametricCurve => (
+            "parametric_curve",
+            include_str!("fixtures/parametric_curve.toml"),
+        ),
+        SystemKind::LSystem => ("lsystem", include_str!("fixtures/lsystem.toml")),
+        SystemKind::StarPattern => ("star_pattern", include_str!("fixtures/star_pattern.toml")),
+        SystemKind::ReactionDiffusion => (
+            "reaction_diffusion",
+            include_str!("fixtures/reaction_diffusion.toml"),
+        ),
+    }
+}
 
 fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -71,8 +86,8 @@ fn headless() -> Option<Renderer> {
     }
 }
 
-/// The fixed frame every baseline is rendered under (a representative
-/// mid-energy frame; Warp Drive is treble-reactive, so treble is up).
+/// The fixed frame every baseline is rendered under — a representative
+/// mid-energy frame with all bands lit, so a band-reactive fixture still draws.
 fn fixed_frame() -> AnalysisFrame {
     AnalysisFrame {
         bass: 0.6,
@@ -128,11 +143,17 @@ fn scenes_match_golden_baselines() {
     std::fs::create_dir_all(golden_dir()).expect("create tests/golden");
 
     let mut failures = Vec::new();
-    for case in CASES {
+    for &system in SYSTEMS {
+        let (stem, toml) = fixture(system);
+        let preset = Preset::from_toml_str(toml)
+            .unwrap_or_else(|e| panic!("golden fixture {stem}.toml is invalid: {e}"));
+        let name = preset.name.clone();
+        renderer.set_presets(vec![preset]);
+
         let fresh = renderer
-            .capture_preset(case.preset, &frame, case.frames)
-            .expect("capture preset");
-        let path = golden_dir().join(format!("{}.png", case.file));
+            .capture_preset(&name, &frame, FRAMES)
+            .expect("capture fixture");
+        let path = golden_dir().join(format!("{stem}.png"));
 
         if bless {
             encode(&fresh, &path);
@@ -149,13 +170,11 @@ fn scenes_match_golden_baselines() {
         let mean = frame_diff(&baseline, &fresh);
         let outlier = max_channel_outlier(&baseline, &fresh);
         println!(
-            "{:<8} mean {mean:.4} (tol {MEAN_TOL}) max_outlier {outlier} (tol {MAX_OUTLIER})",
-            case.file
+            "{stem:<18} mean {mean:.4} (tol {MEAN_TOL}) max_outlier {outlier} (tol {MAX_OUTLIER})"
         );
         if mean > MEAN_TOL || outlier > MAX_OUTLIER {
             failures.push(format!(
-                "{}: mean {mean:.4} / outlier {outlier} exceeds tolerance",
-                case.file
+                "{stem}: mean {mean:.4} / outlier {outlier} exceeds tolerance"
             ));
         }
     }

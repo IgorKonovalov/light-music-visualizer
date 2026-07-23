@@ -1,0 +1,14 @@
+# GOLDEN FIXTURE - do not tune; editing this invalidates the drift baseline (ADR-0023)
+# Minimal Gray-Scott field with constant params in the pattern-forming band. The
+# 30-blob initial scatter is seeded (NFR 6), so with no beat injection the field
+# still evolves a non-trivial, exactly-reproducible pattern over the capture.
+system = "reaction_diffusion"
+name   = "fixture_reaction_diffusion"
+
+[params]
+feed   = "0.037"
+kill   = "0.06"
+flow   = "1.0"
+inject = "0"
+hue    = "0.1"
+glow   = "0.8"
