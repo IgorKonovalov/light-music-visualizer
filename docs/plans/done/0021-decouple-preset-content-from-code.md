@@ -1,9 +1,29 @@
 # 0021 — Decouple preset content from code: build-time embedding + single-source system names
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-23
+> **Closed:** 2026-07-23
 > **Owner skill(s):** dev
-> **Related ADRs:** [0022](../adrs/0022-build-time-preset-embedding.md)
+> **Related ADRs:** [0022](../adrs/0022-build-time-preset-embedding.md) (accepted)
+>
+> **Close summary (Mode 4 review — no blockers, no majors, no minors, no nits):** Both phases
+> landed exactly as planned across three commits — `e1e4f1f` (Phase 1: `core/build.rs` generates
+> `EMBEDDED` from `presets/*.toml`), `11798c3` (rustfmt of `build.rs`), `0241b7d` (Phase 2:
+> single-source `SystemKind` name↔kind mapping). Verified: the generated `EMBEDDED` reproduces
+> the prior embedded set **exactly** — 22 filename-sorted entries, byte-for-byte the same file set
+> as the old hand-written array (diff of old array names vs `presets/*.toml` = identical;
+> `README.md` correctly excluded by the `toml` extension filter). `build.rs` is **zero-dependency**
+> (std `read_dir` + sort + string emit), resolves `presets/` from `CARGO_MANIFEST_DIR` (not CWD),
+> emits absolute `include_str!` paths (escaped, Windows-safe), and registers both the directory and
+> each file for `rerun-if-changed` (covers add/remove **and** edit). The count test is now
+> **structural** — every embedded preset parses, `default_presets().len() == EMBEDDED.len()`, and a
+> `>= 8` floor — no hardcoded number to bump. Phase 2 is a behavior-preserving refactor: `from_name`
+> made `pub` + new `as_str`, `shot.rs` deletes its two duplicate matches and keeps only its friendly
+> error text. ADR-0022's constraints hold: **no new dependency, C ABI frozen** (no ffi/abi/header
+> file touched). Gates: `cargo test -p lmv-core --test preset` 10/10 green (incl.
+> `embedded_default_presets_all_parse`); `clippy -p lmv-core -p standalone --all-targets -D warnings`
+> clean. Two documented followups remain (below): the user-gated `preset-author` skill-note update,
+> and the `docs/presets.md` rewrite owned by Plan 0019. Version **minor 0.6.0 → 0.7.0** at close.
 
 ## TL;DR
 
