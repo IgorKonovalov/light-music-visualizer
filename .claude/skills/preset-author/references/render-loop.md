@@ -63,6 +63,43 @@ sheet stays readable.
 > If Plan 0015 lands while you're using this skill, prefer its `LMV_PRESET_DIR` / single-file flag —
 > that's exactly the kind of tooling improvement this loop wants. Re-check `shot.rs`.
 
+## Refreshing an already-seeded preset (the write-if-absent trap)
+
+The section above is for a **new** draft. Editing a preset that already ships (or one you
+rendered once, so it's already in the per-user dir) has an extra trap: **first-run seeding
+is write-if-absent** — `core/src/preset/mod.rs::seed_dir` *never* overwrites a file that
+already exists (verify: read its doc comment, ~line 109). Consequences:
+
+- The **repo `presets/<name>.toml` is the canonical source of truth** — it's also what's
+  compiled into the `EMBEDDED` set. Always edit there.
+- The per-user copy under `%APPDATA%\light-music-visualizer\presets\` is a **runtime cache**
+  the app seeded once and will *never* re-sync. Editing only the repo file is invisible to
+  `shot` and to the running app — forever.
+
+So to make an edit actually render, **copy the canonical file over the cached copy** (this is
+the step whose absence produces "I changed it but it looks the same"):
+
+```sh
+# after editing presets/<name>.toml
+cp presets/<name>.toml "$APPDATA/light-music-visualizer/presets/<name>.toml"
+
+# then verify — shot reads the per-user dir:
+cargo run -p standalone --example shot -- --preset "<name>" \
+  --set bass=1,mid=1,treb=1,onset=1,beat=1,bar=0.5 --out loud.png
+```
+
+The "clean" alternative — delete the cached copy and relaunch the app to re-seed — only picks
+up your edit **after `cargo build`**, because re-seeding writes the *compile-time* `EMBEDDED`
+copy, not your on-disk repo edit. The copy-over avoids the rebuild; prefer it while iterating.
+
+**Symptom this prevents:** "I changed the preset but it looks the same as before" is almost
+always an edit that reached the repo file (or vice-versa, only the cache) but not both. Repo =
+canonical, per-user dir = cache; keep them in sync with the copy-over.
+
+> When **Plan 0015's `LMV_PRESET_DIR`** lands, this whole dance collapses to pointing shot/app
+> at the repo `presets/` dir directly — that override has real, repeated demand, and this trap
+> is exactly why. Re-check `shot.rs`; prefer the override the moment it exists.
+
 ## Other modes
 
 | Flag | Effect |
