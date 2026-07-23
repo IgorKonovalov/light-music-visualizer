@@ -77,12 +77,22 @@ struct VizSession {
     uint32_t rate = 0;
     uint16_t channels = 0;
     bool visible = true;   // is the owner host currently shown?
+    // The surface was attached before the host had a real (non-zero) client
+    // size - a Default UI panel is created 0x0, then sized by the layout. Such
+    // a surface never presents; recreate it once the first real WM_SIZE lands.
+    // Without this, a panel added mid-playback stays blank until an audio-format
+    // change happens to recreate the handle (see reattach_at_current_size).
+    bool needs_reattach = false;
     UINT timer_ms = 0;     // current render-timer interval (0 = not running)
     ULONGLONG last_log_ms = 0;    // last diagnostics-log write (GetTickCount64)
     LONGLONG last_render_qpc = 0; // QPC at the previous render (0 = first frame)
 
     void destroy_handle();
     void ensure_handle(uint32_t rate, uint16_t channels);
+    // Recreate the handle so its wgpu surface re-attaches at the owner's current
+    // (now real) client size. Used once when the initial attach happened at a
+    // degenerate size (needs_reattach); preserves the current stream format.
+    void reattach_at_current_size();
     void push_converted(const audio_sample *data, size_t total, unsigned channels);
     void pump();
     // Real seconds since the previous render, for the frame-rate-independent
@@ -191,6 +201,7 @@ void VizSession::destroy_handle() {
     }
     rate = 0;
     channels = 0;
+    needs_reattach = false;
 }
 
 // (Re)create the core handle for a stream format and attach the owner window.
@@ -212,6 +223,11 @@ void VizSession::ensure_handle(uint32_t new_rate, uint16_t new_channels) {
     handle = h;
     rate = new_rate;
     channels = new_channels;
+    // If the owner had no real client area yet (a panel is created 0x0 then
+    // sized), this surface was attached at the 1x1 fallback and will not
+    // present. Flag it so the first real WM_SIZE recreates the handle at the
+    // correct size instead of merely resizing the dead surface.
+    needs_reattach = (w == 0 || ht == 0);
     // Every freshly created handle loads the shared curated + user library so
     // Next-scene cycles it. Called here (not only on claim) so a mid-playback
     // format change, which recreates the handle, does not drop the presets.
@@ -220,6 +236,14 @@ void VizSession::ensure_handle(uint32_t new_rate, uint16_t new_channels) {
     // handle re-creation (mid-playback format change); the core otherwise
     // re-seeds from the env at create.
     if (g_abi_ok) lmv_set_debug(h, g_debug_flags);
+}
+
+void VizSession::reattach_at_current_size() {
+    if (owner == nullptr || handle == nullptr) return;
+    const uint32_t r = rate;
+    const uint16_t c = channels;
+    destroy_handle();    // clears rate/channels so ensure_handle re-attaches
+    ensure_handle(r, c); // fresh lmv_create + lmv_attach_window at the real size
 }
 
 // Append a diagnostics sample to %APPDATA%\light-music-visualizer\
@@ -446,7 +470,14 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             set_host_visibility(wnd, !hidden);
             if (g_session.owner == wnd) {
                 if (!hidden && g_session.handle != nullptr) {
-                    lmv_resize(g_session.handle, LOWORD(lp), HIWORD(lp));
+                    if (g_session.needs_reattach) {
+                        // First real size for a surface attached while the host
+                        // was still 0-sized: recreate it so it actually presents
+                        // (a plain resize can't revive the dead 1x1 surface).
+                        g_session.reattach_at_current_size();
+                    } else {
+                        lmv_resize(g_session.handle, LOWORD(lp), HIWORD(lp));
+                    }
                 }
             } else {
                 InvalidateRect(wnd, nullptr, FALSE); // re-centre the placeholder
