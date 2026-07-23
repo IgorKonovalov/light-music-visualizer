@@ -127,6 +127,55 @@ impl Roster {
     }
 }
 
+/// Render-layer one-pole low-pass over evaluated parameter values (ADR-0019 /
+/// Plan 0018 Phase 5). Each active-preset binding gets optional exponential
+/// smoothing with a per-param time constant `tau` (seconds), applied on the
+/// injected real `dt` **between** `expr.eval` and `set_param`, so band- and
+/// beat-driven motion eases instead of snapping. The expression layer stays pure
+/// and allocation-free — the smoothing state lives only here.
+///
+/// State is keyed by binding **index** (the active preset's `params` are a stable
+/// name-sorted `Vec`) and is **reset on every active-preset change** (a switch
+/// snaps to the incoming preset's first value — no cross-preset bleed) and on the
+/// capture scene-rebuild (so a headless capture stays a pure function of its
+/// inputs, NFR 6).
+#[derive(Default)]
+struct ParamSmoother {
+    /// Last smoothed value per binding index; grown lazily and seeded with the
+    /// first frame's raw value, so the first frame after a reset snaps rather than
+    /// drifting up from a stale zero. Cleared on reset.
+    last: Vec<f32>,
+}
+
+impl ParamSmoother {
+    /// Forget all state so the next frame snaps to the incoming values.
+    fn reset(&mut self) {
+        self.last.clear();
+    }
+
+    /// Smooth `raw` for binding `index` toward its previous value with time
+    /// constant `tau` seconds over `dt` seconds. `tau <= 0` (the default), a
+    /// non-finite `tau`, or a non-positive `dt` passes `raw` through unchanged.
+    /// The first frame after a reset seeds the state with `raw` (a snap).
+    fn smooth(&mut self, index: usize, raw: f32, tau: f32, dt: f32) -> f32 {
+        if self.last.len() <= index {
+            self.last.resize(index + 1, raw);
+        }
+        let Some(slot) = self.last.get_mut(index) else {
+            return raw; // unreachable after the resize; never panics on the hot path
+        };
+        if tau <= 0.0 || !tau.is_finite() || dt <= 0.0 {
+            *slot = raw;
+            return raw;
+        }
+        // alpha = 1 - exp(-dt/tau): the fraction of the gap closed this frame,
+        // frame-rate-independent because `dt` is real elapsed time (ADR-0019).
+        let alpha = 1.0 - (-dt / tau).exp();
+        *slot += alpha * (raw - *slot);
+        *slot
+    }
+}
+
 /// How to build a headless [`Renderer`] for capture (Plan 0013).
 #[derive(Debug, Clone, Copy)]
 pub struct HeadlessOptions {
@@ -165,6 +214,9 @@ pub struct Renderer {
     /// (ADR-0007: the cap is never a silent cut). Refreshed whenever the active
     /// preset changes; the frontend surfaces it. `None` when geometry fit.
     cap_overflow: Option<CapOverflow>,
+    /// Per-parameter easing state (ADR-0019 / Phase 5), reset on every
+    /// active-preset change and capture rebuild.
+    param_smoother: ParamSmoother,
 }
 
 impl Renderer {
@@ -192,6 +244,7 @@ impl Renderer {
             #[cfg(feature = "text")]
             text_layer,
             cap_overflow: None,
+            param_smoother: ParamSmoother::default(),
         };
         // Apply the initial preset's structural config (ADR-0007) so a line
         // scene at roster index 0 renders with its geometry built.
@@ -221,6 +274,7 @@ impl Renderer {
             #[cfg(feature = "text")]
             text_layer,
             cap_overflow: None,
+            param_smoother: ParamSmoother::default(),
         };
         // Apply the initial preset's structural config (ADR-0007) so a line
         // scene at roster index 0 renders with its geometry built.
@@ -265,6 +319,7 @@ impl Renderer {
             #[cfg(feature = "text")]
             text_layer,
             cap_overflow: None,
+            param_smoother: ParamSmoother::default(),
         };
         // Apply the initial preset's structural config (ADR-0007) so a line
         // scene at roster index 0 renders with its geometry built.
@@ -376,6 +431,9 @@ impl Renderer {
     /// A `None` config (fragment/swarm, or a curve on the family default) is a
     /// no-op via the trait's default `configure`.
     fn configure_active_scene(&mut self) {
+        // Snap the eased params to the incoming preset's first values — no
+        // cross-preset bleed, and determinism across capture rebuilds (ADR-0019).
+        self.param_smoother.reset();
         let Self {
             scenes,
             roster,
@@ -493,6 +551,7 @@ impl Renderer {
             text_layer,
             // Set at preset load, surfaced by the frontend — not a per-frame concern.
             cap_overflow: _,
+            param_smoother,
         } = self;
 
         let Some(preset) = roster.active_preset() else {
@@ -516,8 +575,14 @@ impl Renderer {
         scene.advance(dt);
         background.reset_params();
         scene.reset_params();
-        for binding in &preset.params {
-            let value = binding.expr.eval(&vars);
+        for (index, binding) in preset.params.iter().enumerate() {
+            let raw = binding.expr.eval(&vars);
+            // Ease the evaluated value on the injected real `dt` before applying
+            // it (ADR-0019). An unlisted param has `tau = 0` = no smoothing, so it
+            // passes through instantly (today's behaviour); the expression layer
+            // above stays pure and allocation-free.
+            let tau = preset.smoothing.get(&binding.name).copied().unwrap_or(0.0);
+            let value = param_smoother.smooth(index, raw, tau, dt);
             // Route `bg_*` params to the background pass; everything else to the
             // scene. The namespaces are disjoint, so no param reaches both.
             if !background.set_param(&binding.name, value) {
@@ -827,7 +892,7 @@ mod tests {
     // path (`headless_or_skip` panics on an unexpected build error).
     #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
-    use super::{HeadlessOptions, RenderError, Renderer, Roster};
+    use super::{HeadlessOptions, ParamSmoother, RenderError, Renderer, Roster};
     use crate::dsp::AnalysisFrame;
     use crate::preset::Preset;
 
@@ -1057,6 +1122,93 @@ mod tests {
         assert!(
             renderer.cap_overflow().is_none(),
             "a mirror that fits within the cap reports no overflow"
+        );
+    }
+
+    /// Phase 5 (ADR-0019): a step change eases toward the target over several
+    /// frames instead of snapping, and converges. The one-pole is the whole point.
+    #[test]
+    fn smoothing_eases_a_step_instead_of_snapping() {
+        let mut s = ParamSmoother::default();
+        let dt = 1.0 / 60.0;
+        let tau = 0.1;
+        // The first value after a reset snaps (it seeds the state).
+        assert_eq!(s.smooth(0, 0.0, tau, dt), 0.0);
+        // A step to 1.0 closes only a fraction of the gap — eased, not snapped.
+        let f1 = s.smooth(0, 1.0, tau, dt);
+        assert!(f1 > 0.0 && f1 < 1.0, "eased, not snapped: {f1}");
+        let f2 = s.smooth(0, 1.0, tau, dt);
+        assert!(f2 > f1 && f2 < 1.0, "monotonic approach: {f1} -> {f2}");
+        // Many frames of the held target converge to it.
+        for _ in 0..600 {
+            s.smooth(0, 1.0, tau, dt);
+        }
+        assert!(
+            (s.smooth(0, 1.0, tau, dt) - 1.0).abs() < 1e-3,
+            "converges to the held target"
+        );
+    }
+
+    /// `tau = 0` (the default for an unlisted param) is today's instant behaviour.
+    #[test]
+    fn zero_tau_passes_through_instantly() {
+        let mut s = ParamSmoother::default();
+        let dt = 1.0 / 60.0;
+        assert_eq!(s.smooth(0, 0.5, 0.0, dt), 0.5);
+        assert_eq!(s.smooth(0, 0.9, 0.0, dt), 0.9, "tau=0 snaps every frame");
+    }
+
+    /// A reset makes the next frame snap to the incoming value — the mechanism
+    /// behind a preset switch snapping to the new preset (no cross-preset bleed).
+    #[test]
+    fn reset_snaps_to_the_next_value() {
+        let mut s = ParamSmoother::default();
+        let dt = 1.0 / 60.0;
+        let tau = 0.2;
+        s.smooth(0, 0.0, tau, dt);
+        for _ in 0..10 {
+            s.smooth(0, 1.0, tau, dt); // partway toward 1.0
+        }
+        s.reset();
+        assert_eq!(
+            s.smooth(0, 5.0, tau, dt),
+            5.0,
+            "after a reset the next value seeds fresh — a snap, no stale bleed"
+        );
+    }
+
+    /// Phase 5 determinism (NFR 6): a preset with a `[smoothing]` table, captured
+    /// twice, is byte-identical — the smoother state resets on the capture
+    /// scene-rebuild, so a capture stays a pure function of its inputs.
+    #[test]
+    fn smoothed_preset_capture_is_deterministic() {
+        let Some(mut renderer) = headless_or_skip(HeadlessOptions {
+            width: 96,
+            height: 96,
+            prefer_software: true,
+        }) else {
+            return;
+        };
+        let smoothed = Preset::from_toml_str(
+            "system = \"fragment_field\"\nname = \"Smoothed\"\n\
+             [params]\nwarp = \"0.3 + bass * 0.4\"\nhue = \"0.2\"\nglow = \"0.8\"\n\
+             [smoothing]\nwarp = 0.25\n",
+        )
+        .expect("valid smoothed preset");
+        renderer.set_presets(vec![smoothed]);
+        let frame = AnalysisFrame {
+            bass: 0.8,
+            ..Default::default()
+        };
+        let a = renderer
+            .capture_preset("Smoothed", &frame, 30)
+            .expect("capture Smoothed a");
+        let b = renderer
+            .capture_preset("Smoothed", &frame, 30)
+            .expect("capture Smoothed b");
+        assert_eq!(
+            a.rgba, b.rgba,
+            "smoothing state resets on rebuild -> identical recaptures"
         );
     }
 }

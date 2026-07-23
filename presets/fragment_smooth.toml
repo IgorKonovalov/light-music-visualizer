@@ -1,0 +1,19 @@
+# Smooth Pulse - a fragment field whose beat-driven flash and glow EASE rather
+# than snap, and whose bass warp is low-passed so the fold breathes instead of
+# jittering (Plan 0018 Phase 5 / ADR-0019). The [smoothing] table gives each
+# param its own time constant in seconds: a punchy-but-soft flash, a slower glow
+# swell, and a gentle warp drift.
+system = "fragment_field"
+name   = "Smooth Pulse"
+
+[params]
+warp  = "0.4 + bass * 0.6"
+hue   = "0.55 + time * 0.02 + treb * 0.2"
+zoom  = "0.9"
+glow  = "0.6 + beat * 0.6"
+flash = "beat"
+
+[smoothing]
+warp  = 0.18
+glow  = 0.28
+flash = 0.35

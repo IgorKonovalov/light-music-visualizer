@@ -93,6 +93,13 @@ pub struct Preset {
     /// at preset load via `Scene::configure`. `None` for the fragment/swarm
     /// systems and for curve presets that accept the family default.
     pub config: Option<GeneratorConfig>,
+    /// Optional per-parameter easing time constants in **seconds** (ADR-0019 /
+    /// Plan 0018 Phase 5), from a `[smoothing]` table. A param not listed (the
+    /// default) is applied instantly, exactly as before; a `tau` of `0` also
+    /// means no smoothing. The renderer low-passes each evaluated value on the
+    /// injected `dt` before applying it, so band/beat motion eases instead of
+    /// snapping. Keyed by param name; validated non-negative at load.
+    pub smoothing: BTreeMap<String, f32>,
 }
 
 impl Preset {
@@ -119,11 +126,23 @@ impl Preset {
         // scene. Built per system so each reads the right table.
         let config = build_config(system, raw.curve, raw.generator, raw.particles)?;
 
+        // Easing time constants (ADR-0019): validated non-negative + finite at the
+        // load boundary, then trusted by the render-layer smoother. A bad value is
+        // a surfaced load error, never a panic.
+        for (param, seconds) in &raw.smoothing {
+            if !seconds.is_finite() || *seconds < 0.0 {
+                return Err(PresetError::Config(format!(
+                    "smoothing '{param}' must be a non-negative number of seconds, got {seconds}"
+                )));
+            }
+        }
+
         Ok(Preset {
             name,
             system,
             params,
             config,
+            smoothing: raw.smoothing,
         })
     }
 }
@@ -190,6 +209,10 @@ struct RawPreset {
     /// the attractor family for the compute-particle scene.
     #[serde(default)]
     particles: Option<RawParticles>,
+    /// The optional `[smoothing]` table (ADR-0019): per-parameter easing time
+    /// constants in seconds. Absent means every param is applied instantly.
+    #[serde(default)]
+    smoothing: BTreeMap<String, f32>,
 }
 
 /// The raw `[particles]` table: which strange-attractor family the
