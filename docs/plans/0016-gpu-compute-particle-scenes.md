@@ -104,17 +104,37 @@ skeleton — a visible animated attractor end-to-end — not plumbing.
 - **Done when:** presets exist for >=3 families, each visibly distinct in the `shot` contact
   sheet; family selection is data-driven (no engine edit to add a preset for an existing family).
 
-### Phase 5 — Regression coverage + golden baseline
+### Phase 5 — Regression coverage + per-system golden fixture
 - **Owner skill:** dev
-- **Area:** core
+- **Area:** core tests
 - **What:** Extend `core/tests/` sanity/reactivity for the particle scene (coverage + quadrant
-  spread against its own sampled background, not tautological), and bless a `shot` golden
-  baseline using the software adapter with the existing mean/outlier tolerance (chaos-amplified
-  FP divergence means structural metrics, not pixel-exact, are the assertion of record).
-- **Files touched:** `core/tests/*.rs`, `assets/golden/*` (software-adapter baselines).
+  spread against its own sampled background, not tautological) — these structural metrics stay the
+  cross-adapter behavioral assertion of record, since chaos-amplified FP divergence makes pixels
+  differ across GPUs. Then add the particle system's **frozen golden fixture** per the post-Plan-0022
+  layout ([ADR-0023](../adrs/0023-golden-drift-guard-uses-frozen-fixtures.md)): golden now renders one
+  do-not-tune fixture per `SystemKind` under `core/tests/fixtures/`, keyed by an exhaustive
+  `match SystemKind` in `golden.rs::fixture`, and drift is a WARP-only pixel comparison (deterministic
+  on that one adapter, so a seeded particle scene pins fine there). The new `SystemKind` variant this
+  plan adds makes `fixture()` fail to compile until its arm exists — author `fixtures/<system>.toml`
+  (minimal, deterministic, do-not-tune header), add the `fixture()` arm **and** the `SYSTEMS` entry,
+  and bless + eyeball the baseline on WARP.
+- **Also close the Plan 0022 half-enforced-coverage followup here** (this phase is its folded-in home):
+  golden's `SYSTEMS` iteration list is hand-maintained *separately* from the exhaustive `fixture()`
+  match, so today a new variant is compiler-forced to add a fixture **arm** but **not** forced into
+  `SYSTEMS` — it could compile green and silently never be rendered/compared. Add a structural guard so
+  `SYSTEMS` provably covers every `SystemKind` variant (e.g. an `assert_eq!(SYSTEMS.len(), <variant
+  count>)` backed by a single source, or derive one list from the other) — a variant absent from
+  `SYSTEMS` must then fail the suite, not just a missing arm. This plan's new variant is the first real
+  exercise of that guard.
+- **Files touched:** `core/tests/golden.rs` (fixture arm + `SYSTEMS` entry + coverage guard),
+  `core/tests/fixtures/<system>.toml`, `core/tests/golden/<system>.png` (WARP-blessed baseline),
+  `core/tests/sanity.rs` / `core/tests/reactivity.rs` (new cases).
 - **Done when:** `cargo test -p lmv-core` green (new sanity + reactivity cases included);
-  `cargo clippy -p lmv-core -p standalone --all-targets -D warnings` clean; golden drift test
-  passes on the software adapter within tolerance.
+  `cargo clippy -p lmv-core -p standalone --all-targets -D warnings` clean; the particle system has
+  exactly one fixture + one WARP-blessed baseline and golden passes on WARP within the existing
+  mean/outlier tolerance (skips cleanly on an adapterless runner per ADR-0016); and the new
+  `SYSTEMS`-covers-every-variant guard is in place — removing the particle entry from `SYSTEMS` (or
+  adding a throwaway variant absent from it) fails the suite (verify once, then revert).
 
 ## Data shapes
 

@@ -180,3 +180,9 @@ fn fixture_toml(system: SystemKind) -> &'static str {
 - If Phase 2 finds any shipped preset **not** covered by `sanity`/`reactivity`/`animation`, open a
   small followup to extend the behavioral floors so no shipped preset is wholly unguarded once the
   golden pixel-pin is removed.
+- **[ROUTED → Plan 0016 Phase 5]** Half-enforced coverage: the golden `SYSTEMS` iteration list is
+  hand-maintained separately from the exhaustive `fixture()` match, so a new `SystemKind` is
+  compiler-forced to add a fixture *arm* but not forced into `SYSTEMS` (it could compile green and
+  never be rendered/compared). Fix folded into Plan 0016 Phase 5 (the next tests-touching plan, which
+  adds a new particle `SystemKind`): add a guard that `SYSTEMS` provably covers every variant. Noted
+  at close 2026-07-23.
