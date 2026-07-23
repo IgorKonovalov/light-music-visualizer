@@ -66,8 +66,7 @@ fn main() {
     }
     out.push_str("];\n");
 
-    let out_dir =
-        PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR is set by cargo"));
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR is set by cargo"));
     std::fs::write(out_dir.join("embedded_presets.rs"), out)
         .expect("write generated embedded_presets.rs");
 }
