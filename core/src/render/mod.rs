@@ -34,6 +34,7 @@ pub use capture::CaptureImage;
 pub use context::{RenderContext, RenderError};
 use overlay::Overlay;
 use scenes::Scene;
+pub use scenes::lines::CapOverflow;
 #[cfg(feature = "text")]
 use text::TextLayer;
 #[cfg(feature = "text")]
@@ -151,6 +152,10 @@ pub struct Renderer {
     /// `text` feature (ADR-0009); absent from the plugin/default build.
     #[cfg(feature = "text")]
     text_layer: TextLayer,
+    /// Segment-cap truncation from the active preset's last `configure`, if any
+    /// (ADR-0007: the cap is never a silent cut). Refreshed whenever the active
+    /// preset changes; the frontend surfaces it. `None` when geometry fit.
+    cap_overflow: Option<CapOverflow>,
 }
 
 impl Renderer {
@@ -175,6 +180,7 @@ impl Renderer {
             overlay,
             #[cfg(feature = "text")]
             text_layer,
+            cap_overflow: None,
         };
         // Apply the initial preset's structural config (ADR-0007) so a line
         // scene at roster index 0 renders with its geometry built.
@@ -201,6 +207,7 @@ impl Renderer {
             overlay,
             #[cfg(feature = "text")]
             text_layer,
+            cap_overflow: None,
         };
         // Apply the initial preset's structural config (ADR-0007) so a line
         // scene at roster index 0 renders with its geometry built.
@@ -242,6 +249,7 @@ impl Renderer {
             overlay,
             #[cfg(feature = "text")]
             text_layer,
+            cap_overflow: None,
         };
         // Apply the initial preset's structural config (ADR-0007) so a line
         // scene at roster index 0 renders with its geometry built.
@@ -353,7 +361,13 @@ impl Renderer {
     /// A `None` config (fragment/swarm, or a curve on the family default) is a
     /// no-op via the trait's default `configure`.
     fn configure_active_scene(&mut self) {
-        let Self { scenes, roster, .. } = self;
+        let Self {
+            scenes,
+            roster,
+            cap_overflow,
+            ..
+        } = self;
+        *cap_overflow = None;
         let Some(preset) = roster.active_preset() else {
             return;
         };
@@ -361,8 +375,19 @@ impl Renderer {
             return;
         };
         if let Some(scene) = scenes.get_mut(system_slot(preset.system)) {
-            scene.configure(cfg);
+            // Capture any segment-cap truncation so the frontend can surface it
+            // (ADR-0007: never a silent cut). `None` for the fit/no-config case.
+            *cap_overflow = scene.configure(cfg);
         }
+    }
+
+    /// The segment-cap truncation from the active preset's last `configure`, if
+    /// its geometry hit the fixed cap (ADR-0007: the cap is never a silent cut).
+    /// Refreshed on every active-preset change (select / cycle / hot-reload); the
+    /// standalone surfaces it at load. `None` in the normal case where geometry
+    /// fit — which is every shipped preset.
+    pub fn cap_overflow(&self) -> Option<&CapOverflow> {
+        self.cap_overflow.as_ref()
     }
 
     /// Draw the current preset for this analysis frame. Lost/outdated surfaces
@@ -434,6 +459,8 @@ impl Renderer {
             overlay,
             #[cfg(feature = "text")]
             text_layer,
+            // Set at preset load, surfaced by the frontend — not a per-frame concern.
+            cap_overflow: _,
         } = self;
 
         let Some(preset) = roster.active_preset() else {
@@ -844,6 +871,52 @@ mod tests {
                 .capture_preset("no-such-preset", &frame, 1)
                 .is_err(),
             "an unknown preset name is a clean error, not a panic"
+        );
+    }
+
+    /// Plan 0010 review finding #1: a line generator that hits the segment cap
+    /// must **surface** the truncation, never cut silently (ADR-0007). An
+    /// L-system whose depth blows past the cap reports a `CapOverflow` through
+    /// `configure`, read back via `cap_overflow()`; a grammar that fits reports
+    /// `None`. This is the surfacing half of the cap contract the mechanism
+    /// tracked but nothing exercised.
+    #[test]
+    fn oversized_lsystem_surfaces_a_cap_overflow() {
+        let mut renderer = Renderer::new_headless(HeadlessOptions {
+            width: 64,
+            height: 64,
+            prefer_software: true,
+        })
+        .expect("headless renderer builds");
+
+        // F -> ten F's per iteration: depth 5 is 100k draw steps, far past the
+        // 20k cap, so the build truncates and must report the drop.
+        let huge = Preset::from_toml_str(
+            "system = \"lsystem\"\nname = \"Huge\"\n\
+             [generator]\naxiom = \"F\"\nrules = { F = \"FFFFFFFFFF\" }\n\
+             angle_deg = 20\nmax_depth = 5\n",
+        )
+        .expect("valid lsystem preset");
+        renderer.set_presets(vec![huge]);
+        let overflow = renderer
+            .cap_overflow()
+            .expect("an oversized L-system surfaces its cap truncation");
+        assert!(
+            overflow.dropped > 0,
+            "the dropped-segment count is reported"
+        );
+
+        // A modest grammar (F -> FF, depth 5 = 32 segments) fits — no overflow.
+        let small = Preset::from_toml_str(
+            "system = \"lsystem\"\nname = \"Small\"\n\
+             [generator]\naxiom = \"F\"\nrules = { F = \"FF\" }\n\
+             angle_deg = 20\nmax_depth = 5\n",
+        )
+        .expect("valid lsystem preset");
+        renderer.set_presets(vec![small]);
+        assert!(
+            renderer.cap_overflow().is_none(),
+            "a grammar that fits within the cap reports no overflow"
         );
     }
 }

@@ -21,7 +21,9 @@ use std::rc::Rc;
 
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
-use super::{GeneratorConfig, MAX_SEGMENTS, hankin, palette, transform_cached, turtle};
+use super::{
+    CapOverflow, GeneratorConfig, MAX_SEGMENTS, hankin, palette, transform_cached, turtle,
+};
 use crate::dsp::AnalysisFrame;
 
 /// Maps `thickness` to an NDC-y half-width (see the parametric scene).
@@ -136,7 +138,7 @@ impl Scene for StarPatternScene {
         }
     }
 
-    fn configure(&mut self, cfg: &GeneratorConfig) {
+    fn configure(&mut self, cfg: &GeneratorConfig) -> Option<CapOverflow> {
         // Build + cache the star variants off the hot path. Other config
         // variants belong to sibling line scenes and are ignored.
         match cfg {
@@ -146,6 +148,9 @@ impl Scene for StarPatternScene {
             } => self.build(*order, *contact_angle_deg),
             GeneratorConfig::Curve { .. } | GeneratorConfig::LSystem { .. } => {}
         }
+        // A rosette is `2 * n` segments for the small regular tilings v1 allows
+        // (n <= 12), far under the cap — no truncation to surface.
+        None
     }
 
     fn update(&mut self, _frame: &AnalysisFrame) {

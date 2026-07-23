@@ -57,7 +57,13 @@ pub(crate) trait Scene {
     /// its geometry here; a parametric scene records its family. Default no-op,
     /// so non-line scenes (fragment field, swarm) never implement it. The one
     /// optional widening of this trait ADR-0007 sanctions — keep it to this.
-    fn configure(&mut self, _cfg: &lines::GeneratorConfig) {}
+    ///
+    /// Returns [`Some`](lines::CapOverflow) when building the geometry hit the
+    /// segment cap and truncated, so the frontend can surface it — the cap is
+    /// never a silent cut (ADR-0007 Risks). `None` means it fit (the norm).
+    fn configure(&mut self, _cfg: &lines::GeneratorConfig) -> Option<lines::CapOverflow> {
+        None
+    }
 }
 
 /// The registry: every built-in scene, in cycling order. All scenes are

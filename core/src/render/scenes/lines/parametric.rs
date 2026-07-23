@@ -19,7 +19,7 @@ use std::rc::Rc;
 
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
-use super::{CurveFamily, GeneratorConfig, MAX_SEGMENTS, curves, palette};
+use super::{CapOverflow, CurveFamily, GeneratorConfig, MAX_SEGMENTS, curves, palette};
 use crate::dsp::AnalysisFrame;
 
 /// Maps the `thickness` parameter (a small integer-ish stroke weight) to an
@@ -129,7 +129,7 @@ impl Scene for ParametricCurveScene {
         }
     }
 
-    fn configure(&mut self, cfg: &GeneratorConfig) {
+    fn configure(&mut self, cfg: &GeneratorConfig) -> Option<CapOverflow> {
         // A curve preset records its family here (off the hot path). Later
         // phases' generator config variants are for the generator scenes; this
         // match gains ignore-arms for them when they land.
@@ -138,11 +138,18 @@ impl Scene for ParametricCurveScene {
             // Generator configs (L-system, star) belong to their own scenes.
             GeneratorConfig::LSystem { .. } | GeneratorConfig::Star { .. } => {}
         }
+        // No load-time truncation: the parametric sampler builds nothing here.
+        // Its only cap is a per-frame `samples` clamp in `update` (see there).
+        None
     }
 
     fn update(&mut self, _frame: &AnalysisFrame) {
-        // Sample count clamped to the buffer cap so a huge `samples` can never
-        // overrun the preallocated buffer (ADR-0007 cap is explicit).
+        // Per-frame defensive clamp: a huge `samples` can never overrun the
+        // preallocated buffer (ADR-0007 cap is explicit). Unlike the generator
+        // scenes' load-time build, `samples` is an expression evaluated every
+        // frame, so there is no "load" moment to surface a truncation at, and a
+        // sane curve preset (samples in the hundreds) never approaches the cap —
+        // the clamp is a safety backstop, not a structural cut worth reporting.
         let samples = (self.samples.max(0.0) as usize).min(MAX_SEGMENTS);
         let rotation = self.spin * self.time;
         let base = palette(self.hue);

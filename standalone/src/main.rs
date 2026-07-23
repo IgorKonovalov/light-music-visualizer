@@ -306,6 +306,7 @@ impl AppState {
                 OverlayAction::Redraw | OverlayAction::Close => {}
                 OverlayAction::Select(index) => {
                     self.renderer.select_preset(index);
+                    warn_cap_overflow(&self.renderer);
                     self.update_title();
                 }
             }
@@ -337,6 +338,7 @@ impl AppState {
         match code {
             KeyCode::Space => {
                 self.renderer.cycle_preset();
+                warn_cap_overflow(&self.renderer);
                 self.update_title();
                 self.window.request_redraw();
             }
@@ -614,6 +616,16 @@ fn reload_presets(renderer: &mut Renderer, dir: &Path) {
             dir.display()
         );
         renderer.set_presets(report.presets);
+        warn_cap_overflow(renderer);
+    }
+}
+
+/// Surface a line scene's segment-cap truncation to stderr (ADR-0007: the cap
+/// is never a silent cut). A no-op in the common case where the active preset's
+/// geometry fit within the cap. Called after every active-preset change.
+fn warn_cap_overflow(renderer: &Renderer) {
+    if let Some(overflow) = renderer.cap_overflow() {
+        eprintln!("preset '{}': {overflow}", renderer.preset_name());
     }
 }
 

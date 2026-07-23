@@ -102,6 +102,30 @@ pub enum GeneratorConfig {
     },
 }
 
+/// Reported by [`Scene::configure`](super::super::Scene::configure) when
+/// building a line scene's geometry hit the fixed [`MAX_SEGMENTS`] cap and
+/// truncated. The cap must never be a silent cut (ADR-0007 Risks): `configure`
+/// returns this so the frontend surfaces it at load. Produced off the hot path
+/// (preset load only); `None` is the normal case where geometry fit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapOverflow {
+    /// How many draw segments were dropped at the cap.
+    pub dropped: usize,
+    /// Where the drop happened, for the surfaced message (e.g. `"depth 6"`).
+    pub context: String,
+}
+
+impl std::fmt::Display for CapOverflow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "geometry exceeded the {}-segment cap at {} (dropped {} segment(s)); \
+             reduce the structure or its depth",
+            MAX_SEGMENTS, self.context, self.dropped
+        )
+    }
+}
+
 /// iq-style cosine palette (RGB phase-shifted), matching the swarm/fragment
 /// scenes so line art shares the engine's colour language.
 pub fn palette(t: f32) -> [f32; 3] {

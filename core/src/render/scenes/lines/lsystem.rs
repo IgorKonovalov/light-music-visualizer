@@ -25,7 +25,8 @@ use std::rc::Rc;
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
 use super::{
-    GeneratorConfig, MAX_LSYSTEM_DEPTH, MAX_SEGMENTS, grammar, palette, transform_cached, turtle,
+    CapOverflow, GeneratorConfig, MAX_LSYSTEM_DEPTH, MAX_SEGMENTS, grammar, palette,
+    transform_cached, turtle,
 };
 use crate::dsp::AnalysisFrame;
 
@@ -93,12 +94,6 @@ impl LSystemScene {
         }
     }
 
-    /// The load-time cap overflow, if any: `(depth, segments dropped)`. A
-    /// frontend/diagnostic can surface it; it is never silently swallowed.
-    pub fn overflow(&self) -> Option<(u32, usize)> {
-        self.overflow
-    }
-
     /// Expand + turtle-walk each depth `1..=max_depth` into a cached buffer.
     /// Off the hot path (called from `configure`).
     fn build(&mut self, axiom: &str, rules: &[(char, String)], angle_deg: f32, max_depth: u32) {
@@ -152,7 +147,7 @@ impl Scene for LSystemScene {
         }
     }
 
-    fn configure(&mut self, cfg: &GeneratorConfig) {
+    fn configure(&mut self, cfg: &GeneratorConfig) -> Option<CapOverflow> {
         // Build + cache the grammar's geometry off the hot path. Other config
         // variants belong to sibling line scenes and are ignored.
         match cfg {
@@ -165,6 +160,12 @@ impl Scene for LSystemScene {
             } => self.build(axiom, rules, *angle_deg, *max_depth),
             GeneratorConfig::Curve { .. } | GeneratorConfig::Star { .. } => {}
         }
+        // Surface a cap truncation so the frontend can report it — never a
+        // silent cut (ADR-0007). `None` when every depth fit (the norm).
+        self.overflow.map(|(depth, dropped)| CapOverflow {
+            dropped,
+            context: format!("depth {depth}"),
+        })
     }
 
     fn update(&mut self, _frame: &AnalysisFrame) {
