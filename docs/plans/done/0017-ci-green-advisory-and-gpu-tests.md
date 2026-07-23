@@ -1,6 +1,17 @@
 # 0017 — Green CI: reasoned ttf-parser advisory ignore + adapter-skip for headless GPU tests
 
-> **Status:** approved
+> **Status:** done — Phase 1 (advisory, `95bf510`) + Phase 2 (GPU-test skip, `134d4e3`),
+> both `dev`; passed Mode 4 review 2026-07-23 (no blockers, no majors, no minors; two
+> non-actionable nits). Verified: `cargo deny check` exits 0 (`advisories ok, bans ok,
+> licenses ok, sources ok`) with exactly one reasoned `RUSTSEC-2026-0192` ignore and the
+> corrected `[graph]` comment; all three headless-capture tests route through the shared
+> `headless_or_skip` helper (skip keyed strictly to `RenderError::RequestAdapter`, panic on
+> any other error) and run full assertions green on Windows WARP under nextest; clippy
+> `-D warnings --all-targets` clean with the production hot-path `#![deny(clippy::panic)]`
+> intact (the `clippy::panic` allow is scoped to the test module only). C ABI untouched
+> (still v3); config + `#[cfg(test)]`-only, no hot-path surface. [ADR-0016](../adrs/0016-gpu-tests-opt-in-ci-scope.md)
+> now **accepted**. Followup owns removing the ignore when the text stack no longer pins
+> ttf-parser. See the review notes in the close conversation.
 > **Created:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0016](../adrs/0016-gpu-tests-opt-in-ci-scope.md) (GPU-capture tests skip when no adapter); [0009](../adrs/0009-glyphon-text-rendering.md) (the text stack ttf-parser is load-bearing for)

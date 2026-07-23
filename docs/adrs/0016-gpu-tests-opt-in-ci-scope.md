@@ -1,8 +1,8 @@
 # ADR-0016 — Headless GPU-capture tests skip when no adapter is present (keep GPU out of the CI contract)
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-23
-> **Related plan(s):** 0017-ci-green-advisory-and-gpu-tests
+> **Related plan(s):** 0017-ci-green-advisory-and-gpu-tests (landed, closed 2026-07-23)
 
 ## Context
 

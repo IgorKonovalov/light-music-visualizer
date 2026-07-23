@@ -9,7 +9,6 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0017](0017-ci-green-advisory-and-gpu-tests.md) | Green CI: reasoned ttf-parser advisory ignore + adapter-skip for headless GPU tests | approved | Unbreak `main` (CI run 29985131075) after two **environmental** failures. (1) `cargo deny check` now errors on `RUSTSEC-2026-0192` — `ttf-parser` flagged **unmaintained** (not a vulnerability); it's a load-bearing, upstream-pinned transitive dep of the glyphon text stack (`ttf-parser → fontdb → cosmic-text → glyphon → lmv-core`, all shipped targets, via ADR-0009's `text` feature) that can't be dropped without reversing ADR-0009 or waiting on upstream. Fix = a single **reasoned, tracked `advisories.ignore`** entry (id + reason + revisit trigger) plus correcting a now-false `deny.toml` `[graph]` comment. (2) Two headless GPU-capture tests panic on `macos-latest` because the runner stopped exposing a Metal adapter (no software fallback); fix = **runtime skip on `RenderError::RequestAdapter`** per [ADR-0016](../adrs/0016-gpu-tests-opt-in-ci-scope.md), keeping full assertions on Windows WARP. Config + test-only; **no `ci.yml` change, C ABI untouched**. Followup owns getting off ttf-parser when upstream allows. |
 | [0009](0009-live-performance-features.md) | Live performance features (standalone) | approved | Drive a live DJ show onto a projector from the standalone: borderless-fullscreen on a chosen display, line-in / audio-interface capture (alongside loopback), self-rotating scenes (energy/drop-biased) with a manual hotkey override, experimental track-change detection (core DSP nudge), and a ≥4-hour instrumented soak. Operator choices persist in a per-user `config.toml`. Standalone-only via the native Rust API + one deterministic DSP field in core; C ABI frozen, no ADR. MIDI deferred. Roadmap item 2 (NFR §10). |
 | [0015](0015-preset-dir-override-and-live-iteration.md) | Preset-directory override + live iteration (`LMV_PRESET_DIR`, shot flags) | approved | Edit one **version-controlled** `presets/*.toml` and see it live in **both** the running standalone app and the headless `shot` CLI, no rebuild. An `LMV_PRESET_DIR` env var (honored by both Rust frontends via a **single shared resolver** extracted into a `standalone` lib module) overrides the seeded `%APPDATA%` dir; the app hot-reloads it on a tightened ~150 ms poll (skipping seeding when overridden), and `shot` gets `--presets <dir>` / `--preset-file <path>` flags that beat the env var. Dependency-free (polling, **no** `notify` crate); framed as a power-user "custom preset folder" knob; consolidates Plan 0007's duplicated Rust resolver. Standalone + docs only, **C ABI untouched (v3)**; foobar plugin out of scope. [ADR-0014](../adrs/0014-preset-dir-override-for-dev-iteration.md); rejected app CLI args, symlink, `notify` watcher, duplicated resolver, core-side resolution. |
 | [0016](0016-gpu-compute-particle-scenes.md) | GPU compute-particle scenes: strange attractors | approved | The engine's first **GPU compute-particle** family and idiom B from [ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md): a compute shader steps a storage buffer of particles through a strange-attractor map (De Jong, Clifford, Thomas, 3D-projected Lorenz) each frame from injected `dt`, drawn as additive point-sprites with trails via Plan 0014's `PingPongField`. Attractor coefficients + look scalars are ADR-0002 layer-2 named params so presets bind them to bands/beat; init is `SeededRng`-seeded for determinism (NFR §6). Replaces the CPU swarm's ~10k ceiling for the dense glowing-point look; scales to 100k+ GPU-resident. **First compute pipeline in core** (the ADR's crux); rejected fragment/texture-state particles and extending the CPU swarm. Core-only, **C ABI untouched**, no new dependency. Curl-noise flow fields, fractal flames, and boids are follow-ups on the same idiom. Sequenced **after 0014** (reuses its `PingPongField` + injected-`dt` clock). |
@@ -63,6 +62,28 @@ presets those plans introduce, so doing it **before or alongside** 0010/0014 pay
   iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0017 — Green CI: reasoned ttf-parser advisory ignore + adapter-skip for headless GPU tests](done/0017-ci-green-advisory-and-gpu-tests.md) —
+  **done 2026-07-23**, passed Mode 4 review (no blockers, no majors, no minors; two non-actionable
+  nits). Two `dev` phase commits (`95bf510`, `134d4e3`) unbreaking `main` (CI run 29985131075) after
+  two **environmental** failures. **Phase 1** silenced `RUSTSEC-2026-0192` — `ttf-parser` flagged
+  **unmaintained** (not a vulnerability), load-bearing via the glyphon text stack (`ttf-parser →
+  fontdb → cosmic-text → glyphon → lmv-core`, both shipped targets, ADR-0009's `text` feature),
+  upstream-pinned so undroppable without reversing ADR-0009 or waiting on upstream — with a single
+  **reasoned, tracked `advisories.ignore`** entry (id + unmaintained-not-vuln framing + load-bearing
+  path + revisit trigger) and corrected the now-false `deny.toml` `[graph]` pruning comment. **Phase 2**
+  routed the three headless GPU-capture tests through a shared `headless_or_skip` helper that **skips
+  on `RenderError::RequestAdapter`** (macOS lost its Metal adapter; no software fallback) and panics on
+  any other build error, per [ADR-0016](../adrs/0016-gpu-tests-opt-in-ci-scope.md) (now **accepted**) —
+  keeping full assertions running on Windows WARP every push. Verified: `cargo deny check` exits 0
+  (`advisories/bans/licenses/sources ok`); all three tests run their full assertions green on WARP under
+  nextest; clippy `-D warnings --all-targets` clean with the production hot-path `#![deny(clippy::panic)]`
+  intact (the `clippy::panic` allow is scoped to the `#[cfg(test)]` module only). **Config + test-only —
+  no `ci.yml` change, C ABI untouched (still v3), no hot-path surface.** **Followup (standing):** remove
+  the ignore once a glyphon/cosmic-text bump no longer pins the unmaintained ttf-parser. **Nits
+  (non-actionable):** the `skipped:` notice is stderr-only (nextest hides it on pass) — the exact
+  silent-no-op tradeoff ADR-0016 accepts; and the parallel session's untracked `skill-creator/` /
+  `skills-lock.json` were surfaced-not-swept.
 
 - [0010 — Line-geometry scenes: parametric curves, L-systems, star patterns](done/0010-line-geometry-scenes.md) —
   **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; three minor, two nits). Five
