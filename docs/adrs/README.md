@@ -32,6 +32,6 @@ you need a code comment.
 | [0019](0019-eased-parameters.md) | Eased (smoothed) parameters: render-layer one-pole filtering on injected `dt`; expression layer stays pure | proposed |
 | [0020](0020-preset-grammar-v2-branching-functions-tempo.md) | Preset expression grammar v2: branching (compares + `select`), math functions, `tempo` variable, soft typo warnings (supplements 0002) | proposed |
 | [0021](0021-shared-palette-system.md) | Shared preset-controllable palette system: baked gradient LUT (named + custom stops), bindable color modulation + A/B crossfade (supplements 0002) | proposed |
-| [0022](0022-build-time-preset-embedding.md) | Build-time embedding of the preset library: zero-dep `core/build.rs` generates `EMBEDDED` from `presets/*.toml` (drop a file, it ships; no code edit) | proposed |
+| [0022](0022-build-time-preset-embedding.md) | Build-time embedding of the preset library: zero-dep `core/build.rs` generates `EMBEDDED` from `presets/*.toml` (drop a file, it ships; no code edit) | accepted |
 | [0023](0023-golden-drift-guard-uses-frozen-fixtures.md) | Golden drift guard renders frozen per-system test fixtures (exhaustive `match SystemKind`), not shipped presets; shipped presets keep only behavioral floors | accepted |
 | [0024](0024-cross-preset-transitions.md) | Cross-preset transitions: two-input blend stage over the engine composite, adaptive dual-live/freeze, engine-default policy (builds on 0018) | proposed |

@@ -1,6 +1,6 @@
 # ADR-0022 — Build-time embedding of the preset library (generated, not hand-maintained)
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-23
 > **Related plan(s):** [0021](../plans/0021-decouple-preset-content-from-code.md)
 
