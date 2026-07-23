@@ -25,8 +25,8 @@ use std::rc::Rc;
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
 use super::{
-    CapOverflow, GeneratorConfig, MAX_LSYSTEM_DEPTH, MAX_SEGMENTS, ViewTransform, grammar, palette,
-    transform_cached, turtle,
+    CapOverflow, GeneratorConfig, MAX_LSYSTEM_DEPTH, MAX_SEGMENTS, MirrorSpec, ViewTransform,
+    grammar, palette, replicate_mirror, transform_cached, turtle,
 };
 use crate::dsp::AnalysisFrame;
 
@@ -43,6 +43,9 @@ const DEFAULT_BRIGHTNESS: f32 = 1.0;
 // Shared view transform (ADR-0018): identity by default.
 const DEFAULT_ZOOM: f32 = 1.0;
 const DEFAULT_PAN: f32 = 0.0;
+// Geometry mirror (Phase 4): identity by default.
+const DEFAULT_MIRROR_ORDER: f32 = 1.0;
+const DEFAULT_MIRROR_REFLECT: f32 = 0.0;
 
 /// A generator scene driven by an L-system grammar.
 pub struct LSystemScene {
@@ -51,9 +54,15 @@ pub struct LSystemScene {
     /// Base geometry per depth (index `d - 1`), built once in `configure`.
     /// Positions only; colour/width are applied per frame.
     cached: Vec<Vec<SegmentInstance>>,
-    /// Reused per-frame draw buffer — preallocated so the transform allocates
-    /// nothing on the hot path.
+    /// Reused per-frame draw buffer — the mirrored geometry actually rendered.
+    /// Preallocated so replication allocates nothing on the hot path.
     draw_buf: Vec<SegmentInstance>,
+    /// Reused buffer for the single (pre-mirror) transformed depth, replicated
+    /// into [`draw_buf`](Self::draw_buf) by [`replicate_mirror`]. Preallocated.
+    single_buf: Vec<SegmentInstance>,
+    /// Set when this frame's mirror replication overflowed the cap (Phase 4);
+    /// `None` when it fit. Distinct from the load-time `overflow` below.
+    mirror_overflow: Option<CapOverflow>,
     /// If a depth overflowed the segment cap at load: `(depth, dropped)`. Kept
     /// queryable rather than silently discarded (ADR-0007 cap is never silent);
     /// curated presets stay under the cap so this is normally `None`.
@@ -70,6 +79,8 @@ pub struct LSystemScene {
     zoom: f32,
     pan_x: f32,
     pan_y: f32,
+    mirror_order: f32,
+    mirror_reflect: f32,
 }
 
 impl LSystemScene {
@@ -80,6 +91,8 @@ impl LSystemScene {
             renderer,
             cached: Vec::new(),
             draw_buf: Vec::with_capacity(MAX_SEGMENTS),
+            single_buf: Vec::with_capacity(MAX_SEGMENTS),
+            mirror_overflow: None,
             overflow: None,
             time: 0.0,
             visible_depth: DEFAULT_VISIBLE_DEPTH,
@@ -92,6 +105,8 @@ impl LSystemScene {
             zoom: DEFAULT_ZOOM,
             pan_x: DEFAULT_PAN,
             pan_y: DEFAULT_PAN,
+            mirror_order: DEFAULT_MIRROR_ORDER,
+            mirror_reflect: DEFAULT_MIRROR_REFLECT,
         }
     }
 
@@ -136,6 +151,8 @@ impl Scene for LSystemScene {
         self.zoom = DEFAULT_ZOOM;
         self.pan_x = DEFAULT_PAN;
         self.pan_y = DEFAULT_PAN;
+        self.mirror_order = DEFAULT_MIRROR_ORDER;
+        self.mirror_reflect = DEFAULT_MIRROR_REFLECT;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
@@ -150,6 +167,8 @@ impl Scene for LSystemScene {
             "zoom" => self.zoom = value,
             "pan_x" => self.pan_x = value,
             "pan_y" => self.pan_y = value,
+            "mirror_order" => self.mirror_order = value,
+            "mirror_reflect" => self.mirror_reflect = value,
             _ => {}
         }
     }
@@ -175,6 +194,10 @@ impl Scene for LSystemScene {
             dropped,
             context: format!("depth {depth}"),
         })
+    }
+
+    fn mirror_overflow(&self) -> Option<&CapOverflow> {
+        self.mirror_overflow.as_ref()
     }
 
     fn update(&mut self, _frame: &AnalysisFrame) {
@@ -205,8 +228,16 @@ impl Scene for LSystemScene {
             color,
             width,
             self.draw_progress,
-            &mut self.draw_buf,
+            &mut self.single_buf,
         );
+        // Replicate the single transformed depth under the geometry mirror (Phase
+        // 4); the default identity spec is a 1:1 copy.
+        let mirror = MirrorSpec::from_params(self.mirror_order, self.mirror_reflect);
+        let dropped = replicate_mirror(&self.single_buf, mirror, MAX_SEGMENTS, &mut self.draw_buf);
+        self.mirror_overflow = (dropped > 0).then(|| CapOverflow {
+            dropped,
+            context: format!("mirror x{}", mirror.order),
+        });
     }
 
     fn render(

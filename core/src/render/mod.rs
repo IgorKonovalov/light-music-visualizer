@@ -402,7 +402,17 @@ impl Renderer {
     /// standalone surfaces it at load. `None` in the normal case where geometry
     /// fit — which is every shipped preset.
     pub fn cap_overflow(&self) -> Option<&CapOverflow> {
-        self.cap_overflow.as_ref()
+        // The configure-time overflow (an oversized L-system depth) takes
+        // precedence; otherwise the active scene's per-frame geometry-mirror
+        // overflow (Plan 0018 Phase 4), set once a frame has replicated. Both
+        // reuse the same `CapOverflow` type so the frontend surfaces either.
+        if let Some(overflow) = self.cap_overflow.as_ref() {
+            return Some(overflow);
+        }
+        self.roster
+            .active_preset()
+            .and_then(|preset| self.scenes.get(system_slot(preset.system)))
+            .and_then(|scene| scene.mirror_overflow())
     }
 
     /// Draw the current preset for this analysis frame, advancing all animation
@@ -994,6 +1004,59 @@ mod tests {
         assert!(
             renderer.cap_overflow().is_none(),
             "a grammar that fits within the cap reports no overflow"
+        );
+    }
+
+    /// Plan 0018 Phase 4: the per-frame geometry mirror must also surface a cap
+    /// truncation through `cap_overflow()`, reusing the ADR-0007 `CapOverflow`
+    /// path — never a silent cut. A dense rose replicated six-fold blows past the
+    /// 20k cap; a modest one fits. Unlike the L-system's load-time overflow, this
+    /// one is computed per frame, so it surfaces only after a frame has rendered.
+    #[test]
+    fn oversized_mirror_surfaces_a_cap_overflow() {
+        let Some(mut renderer) = headless_or_skip(HeadlessOptions {
+            width: 64,
+            height: 64,
+            prefer_software: true,
+        }) else {
+            return;
+        };
+        let frame = AnalysisFrame::default();
+
+        // ~5000 chords replicated six-fold = ~30k segments, far past the 20k cap.
+        let huge = Preset::from_toml_str(
+            "system = \"parametric_curve\"\nname = \"MirrorHuge\"\n\
+             [curve]\nfamily = \"maurer_rose\"\n\
+             [params]\nsamples = \"5000\"\nmirror_order = \"6\"\n",
+        )
+        .expect("valid parametric preset");
+        renderer.set_presets(vec![huge]);
+        // Render frames so the per-frame mirror replication runs and records the drop.
+        renderer
+            .capture_preset("MirrorHuge", &frame, 2)
+            .expect("capture MirrorHuge");
+        let overflow = renderer
+            .cap_overflow()
+            .expect("an oversized mirror surfaces its cap truncation");
+        assert!(
+            overflow.dropped > 0,
+            "the dropped-segment count is reported"
+        );
+
+        // A modest rose at order 3 stays well under the cap — no overflow.
+        let small = Preset::from_toml_str(
+            "system = \"parametric_curve\"\nname = \"MirrorSmall\"\n\
+             [curve]\nfamily = \"maurer_rose\"\n\
+             [params]\nsamples = \"200\"\nmirror_order = \"3\"\n",
+        )
+        .expect("valid parametric preset");
+        renderer.set_presets(vec![small]);
+        renderer
+            .capture_preset("MirrorSmall", &frame, 2)
+            .expect("capture MirrorSmall");
+        assert!(
+            renderer.cap_overflow().is_none(),
+            "a mirror that fits within the cap reports no overflow"
         );
     }
 }

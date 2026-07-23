@@ -20,7 +20,8 @@ use std::rc::Rc;
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
 use super::{
-    CapOverflow, CurveFamily, GeneratorConfig, MAX_SEGMENTS, ViewTransform, curves, palette,
+    CapOverflow, CurveFamily, GeneratorConfig, MAX_SEGMENTS, MirrorSpec, ViewTransform, curves,
+    palette, replicate_mirror,
 };
 use crate::dsp::AnalysisFrame;
 
@@ -42,6 +43,9 @@ const DEFAULT_DRAW_PROGRESS: f32 = 1.0;
 // unchanged.
 const DEFAULT_ZOOM: f32 = 1.0;
 const DEFAULT_PAN: f32 = 0.0;
+// Geometry mirror (Phase 4): identity by default (one copy, no reflection).
+const DEFAULT_MIRROR_ORDER: f32 = 1.0;
+const DEFAULT_MIRROR_REFLECT: f32 = 0.0;
 
 /// A parametric line curve (the Maurer rose), sampled per frame and driven by
 /// named preset parameters over the audio analysis.
@@ -50,9 +54,15 @@ pub struct ParametricCurveScene {
     /// "one line renderer"). Only the active scene draws in a frame, so the
     /// shared pipeline + buffer are never contended.
     renderer: Rc<RefCell<LineRenderer>>,
-    /// Reused segment buffer — preallocated to the cap so resampling never
-    /// allocates on the hot path.
+    /// Reused draw buffer — the mirrored geometry actually rendered. Preallocated
+    /// to the cap so replication never allocates on the hot path.
     segments: Vec<SegmentInstance>,
+    /// Reused buffer for the single (pre-mirror) sampled curve, replicated into
+    /// [`segments`](Self::segments) by [`replicate_mirror`]. Preallocated.
+    single_buf: Vec<SegmentInstance>,
+    /// Set when this frame's mirror replication overflowed the segment cap
+    /// (ADR-0007: never a silent cut); `None` when it fit.
+    mirror_overflow: Option<CapOverflow>,
     /// Which curve family to sample, chosen at preset load via `configure`.
     family: CurveFamily,
     /// Shared scene clock (seconds), set by the renderer each frame.
@@ -69,6 +79,8 @@ pub struct ParametricCurveScene {
     zoom: f32,
     pan_x: f32,
     pan_y: f32,
+    mirror_order: f32,
+    mirror_reflect: f32,
 }
 
 impl ParametricCurveScene {
@@ -78,6 +90,8 @@ impl ParametricCurveScene {
         Self {
             renderer,
             segments: Vec::with_capacity(MAX_SEGMENTS),
+            single_buf: Vec::with_capacity(MAX_SEGMENTS),
+            mirror_overflow: None,
             family: CurveFamily::MaurerRose,
             time: 0.0,
             n: DEFAULT_N,
@@ -92,6 +106,8 @@ impl ParametricCurveScene {
             zoom: DEFAULT_ZOOM,
             pan_x: DEFAULT_PAN,
             pan_y: DEFAULT_PAN,
+            mirror_order: DEFAULT_MIRROR_ORDER,
+            mirror_reflect: DEFAULT_MIRROR_REFLECT,
         }
     }
 }
@@ -118,6 +134,8 @@ impl Scene for ParametricCurveScene {
         self.zoom = DEFAULT_ZOOM;
         self.pan_x = DEFAULT_PAN;
         self.pan_y = DEFAULT_PAN;
+        self.mirror_order = DEFAULT_MIRROR_ORDER;
+        self.mirror_reflect = DEFAULT_MIRROR_REFLECT;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
@@ -134,6 +152,8 @@ impl Scene for ParametricCurveScene {
             "zoom" => self.zoom = value,
             "pan_x" => self.pan_x = value,
             "pan_y" => self.pan_y = value,
+            "mirror_order" => self.mirror_order = value,
+            "mirror_reflect" => self.mirror_reflect = value,
             _ => {}
         }
     }
@@ -154,6 +174,10 @@ impl Scene for ParametricCurveScene {
         None
     }
 
+    fn mirror_overflow(&self) -> Option<&CapOverflow> {
+        self.mirror_overflow.as_ref()
+    }
+
     fn update(&mut self, _frame: &AnalysisFrame) {
         // Per-frame defensive clamp: a huge `samples` can never overrun the
         // preallocated buffer (ADR-0007 cap is explicit). Unlike the generator
@@ -171,6 +195,9 @@ impl Scene for ParametricCurveScene {
         ];
         let width = (self.thickness * WIDTH_SCALE).max(0.0005);
 
+        // Sample the single curve, then replicate it under the geometry mirror
+        // (Phase 4). At the default identity spec this is a 1:1 copy, so an
+        // un-mirrored preset is unchanged.
         match self.family {
             CurveFamily::MaurerRose => curves::maurer_rose(
                 self.n,
@@ -181,9 +208,15 @@ impl Scene for ParametricCurveScene {
                 self.draw_progress,
                 color,
                 width,
-                &mut self.segments,
+                &mut self.single_buf,
             ),
         }
+        let mirror = MirrorSpec::from_params(self.mirror_order, self.mirror_reflect);
+        let dropped = replicate_mirror(&self.single_buf, mirror, MAX_SEGMENTS, &mut self.segments);
+        self.mirror_overflow = (dropped > 0).then(|| CapOverflow {
+            dropped,
+            context: format!("mirror x{}", mirror.order),
+        });
     }
 
     fn render(

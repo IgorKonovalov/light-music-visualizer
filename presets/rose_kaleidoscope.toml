@@ -1,0 +1,22 @@
+# Rose Kaleidoscope - a Maurer rose replicated six-fold into a true geometric
+# fractal (Plan 0018 Phase 4). The mirror multiplies the segment set under 6-fold
+# rotation before the cap, so the whole figure is invariant under a 60-degree
+# turn; a beat flips on the reflection for a denser, dihedral bloom.
+system = "parametric_curve"
+name   = "Rose Kaleidoscope"
+
+[curve]
+family = "maurer_rose"
+
+[params]
+n              = "3"
+d              = "47"
+samples        = "220"
+scale          = "0.5"
+spin           = "0.1 + mid * 0.25"
+hue            = "0.35 + time * 0.02 + treb * 0.25"
+thickness      = "1.4 + bass * 1.8"
+brightness     = "0.9 + clamp(bass * 0.5, 0, 0.5)"
+draw_progress  = "1"
+mirror_order   = "6"
+mirror_reflect = "beat"

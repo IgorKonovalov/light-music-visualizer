@@ -22,8 +22,8 @@ use std::rc::Rc;
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
 use super::{
-    CapOverflow, GeneratorConfig, MAX_SEGMENTS, ViewTransform, hankin, palette, transform_cached,
-    turtle,
+    CapOverflow, GeneratorConfig, MAX_SEGMENTS, MirrorSpec, ViewTransform, hankin, palette,
+    replicate_mirror, transform_cached, turtle,
 };
 use crate::dsp::AnalysisFrame;
 
@@ -47,6 +47,9 @@ const DEFAULT_BRIGHTNESS: f32 = 1.0;
 // Shared view transform (ADR-0018): identity by default.
 const DEFAULT_ZOOM: f32 = 1.0;
 const DEFAULT_PAN: f32 = 0.0;
+// Geometry mirror (Phase 4): identity by default.
+const DEFAULT_MIRROR_ORDER: f32 = 1.0;
+const DEFAULT_MIRROR_REFLECT: f32 = 0.0;
 
 /// A generator scene drawing a Hankin star pattern.
 pub struct StarPatternScene {
@@ -54,9 +57,14 @@ pub struct StarPatternScene {
     renderer: Rc<RefCell<LineRenderer>>,
     /// One cached rosette per contact-angle variant, built in `configure`.
     cached: Vec<Vec<SegmentInstance>>,
-    /// Reused per-frame draw buffer — preallocated so the transform allocates
-    /// nothing on the hot path.
+    /// Reused per-frame draw buffer — the mirrored geometry actually rendered.
+    /// Preallocated so replication allocates nothing on the hot path.
     draw_buf: Vec<SegmentInstance>,
+    /// Reused buffer for the single (pre-mirror) transformed variant, replicated
+    /// into [`draw_buf`](Self::draw_buf) by [`replicate_mirror`]. Preallocated.
+    single_buf: Vec<SegmentInstance>,
+    /// Set when this frame's mirror replication overflowed the cap (Phase 4).
+    mirror_overflow: Option<CapOverflow>,
     /// Shared scene clock (seconds).
     time: f32,
     variant: f32,
@@ -69,6 +77,8 @@ pub struct StarPatternScene {
     zoom: f32,
     pan_x: f32,
     pan_y: f32,
+    mirror_order: f32,
+    mirror_reflect: f32,
 }
 
 impl StarPatternScene {
@@ -79,6 +89,8 @@ impl StarPatternScene {
             renderer,
             cached: Vec::new(),
             draw_buf: Vec::with_capacity(MAX_SEGMENTS),
+            single_buf: Vec::with_capacity(MAX_SEGMENTS),
+            mirror_overflow: None,
             time: 0.0,
             variant: DEFAULT_VARIANT,
             rotation: DEFAULT_ROTATION,
@@ -90,6 +102,8 @@ impl StarPatternScene {
             zoom: DEFAULT_ZOOM,
             pan_x: DEFAULT_PAN,
             pan_y: DEFAULT_PAN,
+            mirror_order: DEFAULT_MIRROR_ORDER,
+            mirror_reflect: DEFAULT_MIRROR_REFLECT,
         }
     }
 
@@ -128,6 +142,8 @@ impl Scene for StarPatternScene {
         self.zoom = DEFAULT_ZOOM;
         self.pan_x = DEFAULT_PAN;
         self.pan_y = DEFAULT_PAN;
+        self.mirror_order = DEFAULT_MIRROR_ORDER;
+        self.mirror_reflect = DEFAULT_MIRROR_REFLECT;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
@@ -142,6 +158,8 @@ impl Scene for StarPatternScene {
             "zoom" => self.zoom = value,
             "pan_x" => self.pan_x = value,
             "pan_y" => self.pan_y = value,
+            "mirror_order" => self.mirror_order = value,
+            "mirror_reflect" => self.mirror_reflect = value,
             _ => {}
         }
     }
@@ -161,6 +179,10 @@ impl Scene for StarPatternScene {
         // A rosette is `2 * n` segments for the small regular tilings v1 allows
         // (n <= 12), far under the cap — no truncation to surface.
         None
+    }
+
+    fn mirror_overflow(&self) -> Option<&CapOverflow> {
+        self.mirror_overflow.as_ref()
     }
 
     fn update(&mut self, _frame: &AnalysisFrame) {
@@ -189,8 +211,16 @@ impl Scene for StarPatternScene {
             color,
             width,
             self.draw_progress,
-            &mut self.draw_buf,
+            &mut self.single_buf,
         );
+        // Replicate the single transformed variant under the geometry mirror
+        // (Phase 4); the default identity spec is a 1:1 copy.
+        let mirror = MirrorSpec::from_params(self.mirror_order, self.mirror_reflect);
+        let dropped = replicate_mirror(&self.single_buf, mirror, MAX_SEGMENTS, &mut self.draw_buf);
+        self.mirror_overflow = (dropped > 0).then(|| CapOverflow {
+            dropped,
+            context: format!("mirror x{}", mirror.order),
+        });
     }
 
     fn render(

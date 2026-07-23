@@ -77,6 +77,15 @@ pub(crate) trait Scene {
     fn configure(&mut self, _cfg: &lines::GeneratorConfig) -> Option<lines::CapOverflow> {
         None
     }
+
+    /// The per-frame geometry-mirror cap overflow (Plan 0018 Phase 4), if this
+    /// frame's N-fold replication exceeded the segment cap and truncated. Reuses
+    /// the ADR-0007 [`CapOverflow`](lines::CapOverflow) so the frontend surfaces
+    /// it — the cap is never a silent cut. Default `None`: only the line scenes
+    /// mirror, and only when `mirror_order` pushes past the cap.
+    fn mirror_overflow(&self) -> Option<&lines::CapOverflow> {
+        None
+    }
 }
 
 /// The registry: every built-in scene, in cycling order. All scenes are
