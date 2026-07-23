@@ -1,12 +1,24 @@
-//! Golden-image drift (Plan 0013 Phase 4, HARD with tolerance). Render a small
-//! fixed matrix headless on the software adapter and compare each frame against a
-//! committed baseline PNG within a mean + max-outlier tolerance. `LMV_BLESS=1`
-//! rewrites the baselines.
+//! Golden-image drift (Plan 0013 Phase 4; repointed by Plan 0022, ADR-0023).
+//! This guard defends **engine rendering determinism**, not shipped content: it
+//! renders one **frozen per-system fixture** headless on the software adapter
+//! and compares each frame against a committed baseline PNG within a mean +
+//! max-outlier tolerance. `LMV_BLESS=1` rewrites the baselines.
+//!
+//! The fixtures live as do-not-tune TOML under `tests/fixtures/`, one per
+//! [`SystemKind`], selected by an **exhaustive** match (see [`fixture`]) so a new
+//! scene cannot ship without a drift baseline. They are deliberately *not* the
+//! shipped presets: the `preset-author` lane (ADR-0017) tunes those, and an
+//! intended content tune must never trip this engine-drift alarm. Shipped
+//! presets keep their own guards behaviorally — `sanity` (coverage/spread),
+//! `reactivity` (per-band reaction), and `animation` (motion) each iterate
+//! `default_presets()`, and those floors survive content tuning by design.
 //!
 //! The tolerance absorbs cross-GPU rasterization drift (the software adapter
-//! keeps it small); a genuine visual change — a perturbed scene or binding —
+//! keeps it small); a genuine engine change — a perturbed shader or scene math —
 //! moves a frame well past it. Baselines are ordinary PNGs, viewable in the repo
-//! and PR diffs; eyeball them before blessing (Plan 0013 Phase 8 habit).
+//! and PR diffs; they are WARP-only (macOS has no software Metal fallback, so
+//! the test skips there per ADR-0016) and must be blessed on WARP. Eyeball each
+//! before blessing (Plan 0013 Phase 8 habit).
 
 use std::path::{Path, PathBuf};
 
