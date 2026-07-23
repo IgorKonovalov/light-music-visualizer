@@ -7,7 +7,7 @@ ADR that supersedes the old one and update the status here.
 Rule of thumb: if you can't name an option you're *not* taking, you don't need an ADR —
 you need a code comment.
 
-**Next free number: 0018**
+**Next free number: 0020**
 
 | ADR  | Title                                                      | Status   |
 |------|------------------------------------------------------------|----------|
@@ -28,3 +28,5 @@ you need a code comment.
 | [0015](0015-gpu-compute-particle-idiom.md) | GPU compute pipelines for particle scenes; the four render-idiom catalogue (attractors first) | proposed |
 | [0016](0016-gpu-tests-opt-in-ci-scope.md) | Headless GPU-capture tests skip when no adapter is present (keep GPU out of the CI contract) | proposed |
 | [0017](0017-preset-author-skill-lane.md) | A third skill lane: `preset-author` (preset content, not engine code); two-skill harness becomes three | proposed |
+| [0018](0018-engine-wide-scene-compositing.md) | Engine-wide scene compositing: shared view transform + background pre-pass + feedback trails + screen-space post-effects (fixed order, not a render graph) | proposed |
+| [0019](0019-eased-parameters.md) | Eased (smoothed) parameters: render-layer one-pole filtering on injected `dt`; expression layer stays pure | proposed |
