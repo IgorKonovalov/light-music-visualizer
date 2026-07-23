@@ -10,7 +10,6 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
 | [0015](0015-preset-dir-override-and-live-iteration.md) | Preset-directory override + live iteration (`LMV_PRESET_DIR`, shot flags) | approved | Edit one **version-controlled** `presets/*.toml` and see it live in **both** the running standalone app and the headless `shot` CLI, no rebuild. An `LMV_PRESET_DIR` env var (honored by both Rust frontends via a **single shared resolver** extracted into a `standalone` lib module) overrides the seeded `%APPDATA%` dir; the app hot-reloads it on a tightened ~150 ms poll (skipping seeding when overridden), and `shot` gets `--presets <dir>` / `--preset-file <path>` flags that beat the env var. Dependency-free (polling, **no** `notify` crate); framed as a power-user "custom preset folder" knob; consolidates Plan 0007's duplicated Rust resolver. Standalone + docs only, **C ABI untouched (v3)**; foobar plugin out of scope. [ADR-0014](../adrs/0014-preset-dir-override-for-dev-iteration.md); rejected app CLI args, symlink, `notify` watcher, duplicated resolver, core-side resolution. |
-| [0018](0018-engine-wide-visual-enrichment.md) | Engine-wide visual enrichment: zoom, atmosphere, easing, mirrors | approved | Add four engine-wide visual controls the live smoke of the line scenes surfaced as missing: a shared **view transform** (zoom/pan), a **gradient/atmosphere background** behind every scene, frame-rate-independent **parameter easing** (band/beat motion stops feeling rigid and fast), and **mirrors** — a true line-geometry fractal replication *and* a screen-space kaleidoscope. Lands as a **fixed-order engine composite** (background → scene+view → trails → kaleidoscope → present, [ADR-0018](../adrs/0018-engine-wide-scene-compositing.md)) plus a **render-layer smoothing seam** ([ADR-0019](../adrs/0019-eased-parameters.md)), all audio-bindable as ADR-0002 named params. **Sequenced after 0014** (reuses its offscreen/present + `PingPongField` + injected `dt`); Phases 1-4 (view/background/geometry-mirror) are 0014-independent, Phases 5-7 (easing/trails/kaleidoscope) need it. Core-only, **C ABI untouched**, no new dependency. Rejected a general render graph, per-scene effects, screen-space-only mirror, a stateful `smooth()` builtin, and smoothing on the fixed 1/60 clock. |
 | [0019](0019-preset-grammar-v2.md) | Preset expression grammar v2: branching, math functions, tempo, typo warnings | approved | Grow the preset expression language so authors stop hitting walls: add math functions (`cos sqrt pow smoothstep mod`) + constants (`pi tau`), branching (six comparison operators yielding `0/1` + a `select(cond,x,y)` conditional), and two new variables — `tempo` and experimental `novelty` (plumb the already-computed `AnalysisFrame.bpm`/`novelty`, no new DSP). Fix the silent-typo footgun — an unknown parameter name becomes a surfaced load **warning** (preset still loads its good bindings), backed by each system declaring its param vocabulary. Rewrite the stale `docs/presets.md` (claims 10 presets / 2 systems; code ships 17 / 5) last. Core-only, allocation-free/panic-free per frame, **C ABI untouched**; no new DSP, no boolean ops, no ternary, no Rhai. Pre-1.0 so no backward-compat obligation (additions are incidentally non-breaking). [ADR-0020](../adrs/0020-preset-grammar-v2-branching-functions-tempo.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); from `preset-author`-lane grammar feedback. |
 | [0020](0020-shared-palette-system.md) | Shared palette system: gradient LUT, named + custom palettes, bindable color | approved | Give presets real color control. Both preset-driven scenes hardcode the **same** iq cosine palette, so a preset's only color lever is a scalar `hue` offset — fragment fields can't hold a cohesive mood and swarm color is unreachable (per-particle hue is random across the full wheel, making `hue` a visual no-op). Add one shared `core/src/render/palette.rs` that bakes a gradient (built-in **named** palette or **custom stops**) into a 256-entry LUT every scene colors through — delivered to the fragment scene as a 256x1 1D texture, sampled on CPU by the swarm — plus **fully bindable** color via layer-2 named params (`saturation`, `hue`, fragment `color_span`/`color_center`, swarm `hue_spread`/`hue_center`) and an A/B `palette_mix` crossfade for bindable palette *selection*. Default `spectrum` palette = the exact current cosine, so the 17 shipped presets are **visually unchanged** until re-authored. Adds one thin off-hot-path `Scene::set_palette` hook (second widening after ADR-0007's `configure`). Core-only, **C ABI frozen**, no new dependency; from `preset-author`-lane color feedback (commit 76a2fb4). [ADR-0021](../adrs/0021-shared-palette-system.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); rejected in-shader stop-array, cosine-coefficient params, minimal per-scene fix, bindable integer palette index, OKLab color management. **Independent of the `dt` coupling** (touches preset schema + scene shaders, not the render clock) — can land anytime. |
 | [0023](0023-cross-preset-transitions.md) | Cross-preset visual transitions: MilkDrop-style dissolves between presets | draft | Replace the instant preset **cut** with a MilkDrop-style **dissolve**. An engine `Transition` controller, driven by injected `dt`, blends the outgoing and incoming presets over ~1 s using a **small library** of blend kinds (crossfade, additive/burn, luma-dissolve, wipe/slide). The outgoing side is **snapshotted at transition start** (freeze path + safety net); the incoming renders live; **adaptive** logic re-renders the outgoing scene live too, but only when it is a *different* scene object and the frame budget is healthy, else it falls back to the snapshot (protects the 60 fps iGPU floor, NFR §1, and handles the same-slot case for free). Blends **fully-composited per-preset frames** via a two-input blend stage appended to Plan 0018's composite. Policy (kind/duration) is **engine-configured in code**; preset-declared `[transition]`, beat-quantized dissolves, and operator UI are explicit follow-ups. **Core-only, C ABI untouched, no new dependency.** **Sequenced after Plan 0018** (reuses its offscreen target + present + `Clear`->`Load` scenes; transitively after Plan 0014's `PingPongField` + injected `dt`). Realizes the cross-preset blending deferred by Plan 0003. [ADR-0024](../adrs/0024-cross-preset-transitions.md); rejected single-target alpha, always-dual-live, always-freeze, a `TransitionScene` wrapper, and preset-declared-now. |
@@ -23,20 +22,13 @@ render clock (`Renderer::render(&frame, dt)`, `Scene::advance`, `SCENE_DT` retir
 C ABI **v4 `lmv_render_dt`**, and the `ReactionDiffusion` scene all exist for the plans below to build
 against; see Recently closed. Plan 0013's capture/visual-QA harness landed before it.)
 
-1. **[0018] Engine-wide visual enrichment (zoom/atmosphere/easing/mirrors)** — Phases 5-7 (easing,
-   trails, screen-space kaleidoscope) reuse 0014's now-landed injected `dt` + offscreen/present +
-   `PingPongField`; Phases 1-4 (view transform, background, geometry mirror) are independent.
-   Engine-wide composite + easing seam
-   ([ADR-0018](../adrs/0018-engine-wide-scene-compositing.md), [ADR-0019](../adrs/0019-eased-parameters.md));
-   C ABI untouched. **Approved** — ready for `dev`. A natural companion to the now-landed 0016 (both build
-   the post-0014 composite/effects layer).
-2. **[0023] Cross-preset transitions (MilkDrop-style dissolves)** — **hard-sequenced after 0018**:
-   appends a two-input blend stage to 0018's engine composite (offscreen target + present + `Clear`->
-   `Load` scenes) and snapshots the outgoing composited frame, so it cannot start until 0018 has landed
-   that backbone. Adaptive dual-live/freeze protects the NFR §1 iGPU floor; the heaviest freeze-fallback
-   trigger is 0016's attractor, so landing **after both 0016 and 0018** exercises the full matrix.
-   Core-only, C ABI untouched ([ADR-0024](../adrs/0024-cross-preset-transitions.md)). **Draft** — needs
-   architect/user approval before `dev`.
+1. **[0023] Cross-preset transitions (MilkDrop-style dissolves)** — **hard-sequenced after 0018,
+   which has now landed** (see Recently closed): appends a two-input blend stage to 0018's engine
+   composite (offscreen target + present + `Clear`->`Load` scenes, all now in place) and snapshots the
+   outgoing composited frame. Adaptive dual-live/freeze protects the NFR §1 iGPU floor; the heaviest
+   freeze-fallback trigger is 0016's attractor, so landing **after both 0016 and 0018** exercises the
+   full matrix. Core-only, C ABI untouched ([ADR-0024](../adrs/0024-cross-preset-transitions.md)).
+   **Draft** — needs architect/user approval before `dev`.
 
 (**[0016] GPU compute-particle scenes has now landed and closed** — the engine's first compute
 pipeline + GPU-resident particle system (four strange-attractor families, data-driven `[particles]`
@@ -77,6 +69,50 @@ lane whose color feedback (commit 76a2fb4) motivated it. Core-only, C ABI frozen
   iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0018 — Engine-wide visual enrichment: zoom, atmosphere, easing, mirrors](done/0018-engine-wide-visual-enrichment.md) —
+  **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; three minor, two nits). Eight
+  `dev` phase commits (`bade3eb` shared `ViewTransform` + zoom/pan on line scenes, `0faa087`
+  ViewTransform to fragment+swarm, `02b16e6` engine background pre-pass + scenes `Clear`->`Load`,
+  `536b8c9` geometry mirror for line scenes, `822cc94` eased params via render-layer one-pole,
+  `e67f217` feedback trails, `56d0460` screen-space kaleidoscope, `52673e0` curated presets + doc).
+  Landed the **fixed-order engine composite** ([ADR-0018](../adrs/0018-engine-wide-scene-compositing.md),
+  now **accepted**) — background pre-pass (owns the clear) -> active scene under a shared
+  `ViewTransform` (zoom/pan, applied per family: line vertex shader, fragment sample coords, swarm
+  particle positions) -> feedback trails (`PingPongField` max-decay) -> screen-space kaleidoscope
+  (dihedral pixel-fold) -> present — every stage individually skippable to a **passthrough** (which
+  also sidesteps the DX12-WARP multi-pipeline aliasing, like RD/attractor). Every scene switched
+  `Clear`->`Load` so the background owns the frame. Plus the **render-layer easing seam**
+  ([ADR-0019](../adrs/0019-eased-parameters.md), now **accepted**): an optional per-`(preset,param)`
+  one-pole (`alpha = 1 - exp(-dt/tau)`) on Plan 0014's injected `dt`, between `eval` and `set_param`,
+  reset on preset switch **and** capture rebuild — the expression layer stays pure/zero-alloc; a
+  `[smoothing]` table (`param = seconds`, `tau = 0` default = today's instant behaviour) is validated
+  non-negative/finite at load. The **geometry mirror** is line-only (segment replication under
+  N-fold rotation + optional reflection *before* the cap, surfacing a per-frame `CapOverflow` through
+  a new defaulted `Scene::mirror_overflow()` query); the **kaleidoscope** is the general pixel-fold —
+  both ship, per the product decision. Six curated presets embedded (`rose_zoom`, `rose_atmosphere`,
+  `rose_kaleidoscope`, `rose_trails`, `fragment_kaleido`, `fragment_smooth`) + a `presets/README.md`
+  authoring note for every new param. **Core-only; C ABI untouched; no new dependency.** Verified on
+  WARP: mirror `2*pi/n`-rotation invariance + exact cap-drop reporting, one-pole step/converge/reset,
+  smoothed + trailed `capture_preset` **byte-identical recaptures** (NFR §6 determinism holds through
+  the stateful stages), the 4 sparse-additive golden baselines re-blessed (lost their incidental clear
+  tint, now owned by the default-black backdrop; fragment/RD/attractor byte-identical), embedded-parse
+  + `every_preset_animates` green, hygiene pragma covers the three new `render/` files. **Minor:**
+  (1) the mirror-overflow branch `format!`s a `String` per frame while an audio-driven `mirror_order`
+  sits over the cap (normal fitting path allocates nothing — fix: store `order: u32`, format in
+  `Display`); (2) a **live** mirror overflow never surfaces at the standalone (`warn_cap_overflow`
+  reads only at load; the per-frame drop is exposed via `cap_overflow()` but nothing polls it live);
+  (3) **zoom is semantically inverted** between the fragment field (`zoom>1` = out) and line/swarm
+  (`zoom>1` = in) — deliberate, to honor the hard no-regression done-when (inverting the field would
+  regress all 5 fragment presets + the golden fixture), documented in `presets/README.md`. **Nits:**
+  (4) ADR-0018's "scenes gain no new *required* method" wording undersold the added (defaulted,
+  ISP-clean) `mirror_overflow()` query; (5) `draw_calls` counts the passthrough background clear as a
+  draw (diagnostic estimate only). **⚠ On-device carry-forward** (non-blocking, standing posture): the
+  iGPU 60 fps @ 1080p floor under the passthrough/offscreen cost + active trails/kaleidoscope (NFR §1)
+  — belongs on `docs/on-device-validation.md`. Trails/kaleidoscope run at a fixed 16:9 internal
+  resolution presented stretched (same documented v1 limitation as the RD/attractor presents). Unblocks
+  **Plan 0023** (cross-preset transitions append a blend stage to this composite). Version **minor
+  0.7.1 -> 0.8.0** at close.
 
 - [0024 — Single-source the foobar component version + refresh stale plugin descriptions](done/0024-foobar-component-version-single-source.md) —
   **done 2026-07-23**, passed Mode 4 review cold (**no blockers, no majors, no minors** — one nit).
