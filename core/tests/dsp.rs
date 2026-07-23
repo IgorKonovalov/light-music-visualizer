@@ -19,6 +19,26 @@ fn sine(freq: f32, amp: f32, len: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Sum of equal-amplitude sines (a chord), scaled so the peak stays within
+/// `amp`. Two chords on disjoint frequency ranges give clearly distinct spectra.
+fn chord(freqs: &[f32], amp: f32, len: usize) -> Vec<f32> {
+    let scale = if freqs.is_empty() {
+        0.0
+    } else {
+        amp / freqs.len() as f32
+    };
+    (0..len)
+        .map(|i| {
+            let t = i as f32 / SR as f32;
+            freqs
+                .iter()
+                .map(|f| (std::f32::consts::TAU * f * t).sin())
+                .sum::<f32>()
+                * scale
+        })
+        .collect()
+}
+
 /// Click track: near-silence with a short 0.9-amplitude burst at every beat.
 fn click_track(period_samples: usize, len: usize) -> Vec<f32> {
     let mut signal = vec![0.0f32; len];
@@ -174,6 +194,48 @@ fn band_split_is_frequency_correct() {
 }
 
 #[test]
+fn novelty_spikes_at_a_spectral_boundary() {
+    let mut analyzer = mono_analyzer();
+    // Two 3 s segments with disjoint spectra: a low chord then a high chord.
+    let seg = 3 * SR as usize;
+    let mut signal = chord(&[110.0, 220.0, 330.0], 0.8, seg);
+    signal.extend_from_slice(&chord(&[4_000.0, 6_000.0, 8_000.0], 0.8, seg));
+
+    let boundary_hop = seg / HOP_SIZE;
+    let novelty: Vec<f32> = signal
+        .chunks_exact(HOP_SIZE)
+        .map(|hop| {
+            analyzer.push_interleaved(hop);
+            analyzer.take_frame().novelty
+        })
+        .collect();
+
+    // Well inside segment A the spectrum sits on its own running mean: ~0.
+    let steady_a = novelty[boundary_hop / 2];
+    // Late in segment B the mean has caught up to the new spectrum: also low.
+    let steady_b = *novelty.last().expect("frames were produced");
+    // The boundary (plus the ~4-hop window transition) spikes.
+    let peak = novelty[boundary_hop..(boundary_hop + 12).min(novelty.len())]
+        .iter()
+        .copied()
+        .fold(0.0f32, f32::max);
+
+    assert!(
+        steady_a < 0.1,
+        "steady segment-A novelty {steady_a} should be near zero"
+    );
+    assert!(peak > 0.4, "the boundary should spike novelty (got {peak})");
+    assert!(
+        peak > steady_a * 5.0 + 0.2,
+        "boundary spike {peak} should stand out from steady {steady_a}"
+    );
+    assert!(
+        steady_b < peak,
+        "late segment-B novelty {steady_b} should decay below the spike {peak}"
+    );
+}
+
+#[test]
 fn analysis_is_deterministic() {
     let signal = {
         let mut s = sine(440.0, 0.5, 2 * SR as usize);
@@ -184,20 +246,21 @@ fn analysis_is_deterministic() {
         s
     };
 
-    let run = |mut analyzer: Analyzer| -> Vec<(Vec<u32>, u32, bool, u32, u32)> {
+    let run = |mut analyzer: Analyzer| -> Vec<(Vec<u32>, u32, bool, u32, u32, u32)> {
         signal
             .chunks_exact(HOP_SIZE)
             .map(|hop| {
                 analyzer.push_interleaved(hop);
                 let f = analyzer.take_frame();
                 // Bit-exact comparison via raw f32 bits — covers the enriched
-                // bpm/bar too, so the tempo path is proven deterministic.
+                // bpm/bar and novelty too, so those paths are proven deterministic.
                 (
                     f.spectrum.iter().map(|v| v.to_bits()).collect(),
                     f.onset.to_bits(),
                     f.beat,
                     f.bpm.to_bits(),
                     f.bar.to_bits(),
+                    f.novelty.to_bits(),
                 )
             })
             .collect()

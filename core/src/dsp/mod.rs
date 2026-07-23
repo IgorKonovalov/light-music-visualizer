@@ -18,6 +18,7 @@
 
 pub mod bands;
 pub mod fft;
+pub mod novelty;
 pub mod onset;
 pub mod tempo;
 
@@ -51,6 +52,10 @@ pub struct AnalysisFrame {
     pub bpm: f32,
     /// Beat phase in [0, 1): 0 on each beat, ramping to the next.
     pub bar: f32,
+    /// Experimental spectral track-change novelty (Plan 0009 Phase 4): ~0 within
+    /// a steady segment, spiking at a spectral boundary. Native-API only — not
+    /// exposed across the C ABI.
+    pub novelty: f32,
 }
 
 impl Default for AnalysisFrame {
@@ -64,6 +69,7 @@ impl Default for AnalysisFrame {
             treb: 0.0,
             bpm: 0.0,
             bar: 0.0,
+            novelty: 0.0,
         }
     }
 }
@@ -80,6 +86,7 @@ pub struct Analyzer {
     onset: onset::OnsetDetector,
     bands: bands::BandSplitter,
     tempo: tempo::TempoTracker,
+    novelty: novelty::NoveltyDetector,
     window: [f32; WINDOW_SIZE],
     /// Valid samples in `window`; analysis starts once fully warm.
     window_filled: usize,
@@ -101,6 +108,7 @@ impl Analyzer {
             onset: onset::OnsetDetector::new(),
             bands: bands::BandSplitter::new(format.sample_rate),
             tempo: tempo::TempoTracker::new(format.sample_rate),
+            novelty: novelty::NoveltyDetector::new(format.sample_rate),
             window: [0.0; WINDOW_SIZE],
             window_filled: 0,
             hop: [0.0; HOP_SIZE],
@@ -143,6 +151,7 @@ impl Analyzer {
                     let (onset, beat) = self.onset.process(self.spectrum.magnitudes());
                     let (bass, mid, treb) = self.bands.split(self.spectrum.magnitudes());
                     let (bpm, bar) = self.tempo.process(onset, beat);
+                    let novelty = self.novelty.process(&spectrum);
                     self.latest = AnalysisFrame {
                         spectrum,
                         onset,
@@ -152,6 +161,7 @@ impl Analyzer {
                         treb,
                         bpm,
                         bar,
+                        novelty,
                     };
                     self.pending_beat |= beat;
                 }

@@ -24,6 +24,11 @@ const DROP_FRACTION: f32 = 0.35;
 /// noise (baseline ~0) never looks like a drop.
 const DROP_FLOOR: f32 = 0.05;
 
+/// Novelty score (from the core detector's ~sqrt(2)-at-a-swap scale) that earns
+/// a *full* nudge — pulling the steady-passage cap all the way to the min dwell.
+/// A tuning constant; the on-rig soak (Phase 6) is where it gets calibrated.
+const NOVELTY_REF: f32 = 0.8;
+
 /// Why the director decided to rotate — surfaced for the title/log and asserted
 /// by the unit tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +37,8 @@ pub enum Rotation {
     AutoTimer,
     /// A large downward energy shift past the min dwell.
     AutoDrop,
+    /// A track-change novelty boundary pulled the cap in past the min dwell.
+    AutoBoundary,
     /// The operator forced the next scene.
     Manual,
 }
@@ -51,6 +58,8 @@ pub struct Director {
     /// Smoothed energy baseline (EMA of bass+mid+treb); `warm` once seeded.
     baseline: f32,
     warm: bool,
+    /// Whether the experimental track-change novelty nudge is active.
+    track_change: bool,
 }
 
 impl Director {
@@ -66,6 +75,7 @@ impl Director {
             dwell: 0.0,
             baseline: 0.0,
             warm: false,
+            track_change: rotate.track_change,
         }
     }
 
@@ -102,10 +112,27 @@ impl Director {
         if self.dwell < self.min_dwell {
             return None;
         }
-        // Steady-passage cap: rotate once the max dwell elapses, drop or not.
-        if self.dwell >= self.max_dwell {
+        // Novelty nudge: an experimental track-change boundary pulls the cap from
+        // the max dwell toward the min dwell, so rotation lands sooner near a
+        // detected change. It only shortens the wait past the min dwell, so
+        // novelty is never the sole trigger (beatmatched blends have no hard
+        // edge). Disabled -> nudge is zero, cap stays at the max dwell.
+        let nudge = if self.track_change {
+            (frame.novelty / NOVELTY_REF).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let cap = self.max_dwell - nudge * (self.max_dwell - self.min_dwell);
+        if self.dwell >= cap {
+            // A cap the nudge pulled in (still below the hard max) is a boundary
+            // rotation; reaching the true max is the steady-passage timer.
+            let reason = if self.dwell < self.max_dwell {
+                Rotation::AutoBoundary
+            } else {
+                Rotation::AutoTimer
+            };
             self.dwell = 0.0;
-            return Some(Rotation::AutoTimer);
+            return Some(reason);
         }
         // Drop bias: past the min dwell, a large downward shift rotates early.
         let dropped = was_warm
@@ -152,13 +179,25 @@ mod tests {
         }
     }
 
-    fn director(auto: bool, min: u32, max: u32) -> Director {
+    /// A frame with a given energy and novelty score.
+    fn frame_nov(energy: f32, novelty: f32) -> AnalysisFrame {
+        AnalysisFrame {
+            novelty,
+            ..frame(energy)
+        }
+    }
+
+    fn make(auto: bool, min: u32, max: u32, track_change: bool) -> Director {
         Director::from_config(&config::Rotate {
             auto,
             min_dwell_secs: min,
             max_dwell_secs: max,
-            track_change: false,
+            track_change,
         })
+    }
+
+    fn director(auto: bool, min: u32, max: u32) -> Director {
+        make(auto, min, max, false)
     }
 
     #[test]
@@ -231,6 +270,67 @@ mod tests {
         assert!(!d.auto_enabled());
         assert!(d.toggle_auto());
         assert!(d.auto_enabled());
+    }
+
+    #[test]
+    fn novelty_boundary_rotates_before_the_cap() {
+        let mut d = make(true, 8, 40, true);
+        // Steady, no novelty, past the min dwell: still holds toward the cap.
+        for _ in 0..12 {
+            assert_eq!(d.advance(1.0, &frame_nov(1.0, 0.0)), None);
+        }
+        // A strong novelty boundary pulls the cap to the min dwell and rotates.
+        assert_eq!(
+            d.advance(1.0, &frame_nov(1.0, 1.0)),
+            Some(Rotation::AutoBoundary)
+        );
+    }
+
+    #[test]
+    fn novelty_before_min_dwell_holds() {
+        let mut d = make(true, 8, 40, true);
+        for _ in 0..3 {
+            assert_eq!(d.advance(1.0, &frame_nov(1.0, 0.0)), None);
+        }
+        // A boundary at ~4 s is still inside the min dwell: novelty is never the
+        // sole trigger, so it holds.
+        assert_eq!(d.advance(1.0, &frame_nov(1.0, 1.0)), None);
+    }
+
+    #[test]
+    fn steady_signal_never_rotates_on_novelty() {
+        // Nudge enabled, but a steady low-novelty signal only rotates at the
+        // hard max-dwell cap, never early.
+        let mut d = make(true, 8, 40, true);
+        for step in 1..40 {
+            assert_eq!(
+                d.advance(1.0, &frame_nov(1.0, 0.0)),
+                None,
+                "rotated early at {step}s"
+            );
+        }
+        assert_eq!(
+            d.advance(1.0, &frame_nov(1.0, 0.0)),
+            Some(Rotation::AutoTimer)
+        );
+    }
+
+    #[test]
+    fn disabled_track_change_ignores_novelty() {
+        // With the nudge off, even a sustained boundary novelty can't rotate
+        // before the cap.
+        let mut d = make(true, 8, 40, false);
+        for step in 1..40 {
+            assert_eq!(
+                d.advance(1.0, &frame_nov(1.0, 1.0)),
+                None,
+                "novelty rotated with the nudge disabled at {step}s"
+            );
+        }
+        assert_eq!(
+            d.advance(1.0, &frame_nov(1.0, 1.0)),
+            Some(Rotation::AutoTimer)
+        );
     }
 
     #[test]
