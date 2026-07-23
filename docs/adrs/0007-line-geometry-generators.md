@@ -1,6 +1,6 @@
 # ADR-0007 — Line-geometry generators: a cached-build built-in category + instanced-quad line rendering
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-21
 > **Related plan(s):** [0010-line-geometry-scenes](../plans/0010-line-geometry-scenes.md)
 

@@ -10,7 +10,6 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
 | [0009](0009-live-performance-features.md) | Live performance features (standalone) | approved | Drive a live DJ show onto a projector from the standalone: borderless-fullscreen on a chosen display, line-in / audio-interface capture (alongside loopback), self-rotating scenes (energy/drop-biased) with a manual hotkey override, experimental track-change detection (core DSP nudge), and a ≥4-hour instrumented soak. Operator choices persist in a per-user `config.toml`. Standalone-only via the native Rust API + one deterministic DSP field in core; C ABI frozen, no ADR. MIDI deferred. Roadmap item 2 (NFR §10). |
-| [0010](0010-line-geometry-scenes.md) | Line-geometry scenes: parametric curves, L-systems, star patterns | approved | Add a line-art category to the built-in system vocabulary, ported from the user's Maurer rose / L-systems / Islamic star pattern sketches. One shared `LineRenderer` (segments -> instanced quads, thick + glowing) under two build models: a cheap **parametric** system sampled per frame (the rose) and an expensive **generator** system built at preset load and cached (L-systems, star patterns). Continuous audio drives transform/hue/draw-on every frame; beat accents advance precomputed structural states. New `[curve]`/`[generator]` TOML config table + one optional `Scene::configure` hook ([ADR-0007](../adrs/0007-line-geometry-generators.md)); extends ADR-0002 layer 2. Core-only, C ABI frozen. Preset files ride Plan 0007's seeding. |
 | [0015](0015-preset-dir-override-and-live-iteration.md) | Preset-directory override + live iteration (`LMV_PRESET_DIR`, shot flags) | approved | Edit one **version-controlled** `presets/*.toml` and see it live in **both** the running standalone app and the headless `shot` CLI, no rebuild. An `LMV_PRESET_DIR` env var (honored by both Rust frontends via a **single shared resolver** extracted into a `standalone` lib module) overrides the seeded `%APPDATA%` dir; the app hot-reloads it on a tightened ~150 ms poll (skipping seeding when overridden), and `shot` gets `--presets <dir>` / `--preset-file <path>` flags that beat the env var. Dependency-free (polling, **no** `notify` crate); framed as a power-user "custom preset folder" knob; consolidates Plan 0007's duplicated Rust resolver. Standalone + docs only, **C ABI untouched (v3)**; foobar plugin out of scope. [ADR-0014](../adrs/0014-preset-dir-override-for-dev-iteration.md); rejected app CLI args, symlink, `notify` watcher, duplicated resolver, core-side resolution. |
 | [0016](0016-gpu-compute-particle-scenes.md) | GPU compute-particle scenes: strange attractors | approved | The engine's first **GPU compute-particle** family and idiom B from [ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md): a compute shader steps a storage buffer of particles through a strange-attractor map (De Jong, Clifford, Thomas, 3D-projected Lorenz) each frame from injected `dt`, drawn as additive point-sprites with trails via Plan 0014's `PingPongField`. Attractor coefficients + look scalars are ADR-0002 layer-2 named params so presets bind them to bands/beat; init is `SeededRng`-seeded for determinism (NFR §6). Replaces the CPU swarm's ~10k ceiling for the dense glowing-point look; scales to 100k+ GPU-resident. **First compute pipeline in core** (the ADR's crux); rejected fragment/texture-state particles and extending the CPU swarm. Core-only, **C ABI untouched**, no new dependency. Curl-noise flow fields, fractal flames, and boids are follow-ups on the same idiom. Sequenced **after 0014** (reuses its `PingPongField` + injected-`dt` clock). |
 | [0014](0014-reaction-diffusion-feedback-scene.md) | Reaction-diffusion feedback scene + frame-rate-independent render clock | approved | The engine's first **stateful feedback** scene: a Gray-Scott reaction-diffusion simulation (evolving nested contours / cellular tissue / hatched restructuring maze) on a new reusable `render::feedback::PingPongField` (two offscreen `Rgba16Float` textures swapped each sub-step, fixed internal grid, present pass composites to the surface). Driven by a **fixed-timestep accumulator fed by real injected `dt`** so it looks identical on any device over wall-clock time — the core stays clock-free (Plan 0013 capture feeds a fixed `dt` for reproducibility). Delivering `dt` at the render seam (`Renderer::render(&frame, dt)`) lets us **converge the shared scene clock globally and retire `SCENE_DT`**, making every existing scene frame-rate-independent (resolves the standing SCENE_DT wish). Audio drives it via existing named params (ADR-0002 layer 2): bands modulate feed/kill/flow, beats stamp seeds. Adds C ABI **v4 `lmv_render_dt`** ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md), additive; `lmv_render` becomes the 1/60 wrapper) so the foobar plugin gets parity. New feedback render system per [ADR-0012](../adrs/0012-stateful-feedback-render-system.md); rejected warp-feedback advection, engine-managed multi-pass, per-frame stepping. Core + both frontends. Cross-plan dep: 0013's capture must thread a fixed `dt`. |
@@ -23,21 +22,21 @@ coupling drives it: **0014 depends on 0013's capture threading a fixed `dt`** wh
 `Renderer::capture_preset`/`capture_audio` + the `shot` CLI + the `core/tests/` reactivity/
 animation/sanity/beat/golden suite exist for the scene plans below to build against.)
 
-1. **[0010] Line-geometry scenes** — built against 0013's harness (0013 names it the prime
-   consumer: reactivity / sanity / golden tests + the `shot` gallery for the new curves,
-   L-systems, and star patterns).
-2. **[0014] Reaction-diffusion feedback + retire `SCENE_DT`** — the harness is now in place to test
+1. **[0014] Reaction-diffusion feedback + retire `SCENE_DT`** — the harness is now in place to test
    the feedback scene. **0014 should own the `SCENE_DT` → injected-`dt` migration**, updating
    0013's now-landed `capture_preset`/`capture_audio` to pass a fixed `dt`, so the change lives in
    one plan. Adds C ABI v4 ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md)). *Approved — its scope
    should update 0013's capture primitives to the injected `dt` before dev starts either plan.*
-3. **[0009] Live performance features** — largest, standalone, independent (C ABI frozen). This is
+2. **[0009] Live performance features** — largest, standalone, independent (C ABI frozen). This is
    Roadmap item 2 — bring it forward if the live-show milestone outranks the scene/tooling cluster
    (user's call; the ordering above is tactical, not a re-prioritization of the roadmap).
-4. **[0016] GPU compute-particle scenes (attractors)** — sequenced **after 0014**: it reuses 0014's
+3. **[0016] GPU compute-particle scenes (attractors)** — sequenced **after 0014**: it reuses 0014's
    `PingPongField` (trails) and injected-`dt` clock, so 0014 must land first. Introduces the first
    compute pipeline in core ([ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md)); independent of
-   0009/0010 otherwise. **Approved** — ready for `dev` once 0014 has landed.
+   0009 otherwise. **Approved** — ready for `dev` once 0014 has landed.
+
+(**[0010] Line-geometry scenes has now landed and closed** — the line-art category (roses,
+L-systems, Hankin stars) built on the shared `LineRenderer` is available; see Recently closed.)
 
 **[0015] Preset-dir override** is small, standalone + docs only, and **independent of the coupling
 above** (no `core` change, C ABI frozen) — it can land anytime. It's a strong companion to the
@@ -55,6 +54,33 @@ presets those plans introduce, so doing it **before or alongside** 0010/0014 pay
   iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0010 — Line-geometry scenes: parametric curves, L-systems, star patterns](done/0010-line-geometry-scenes.md) —
+  **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; three minor, two nits). Five
+  `dev` phase commits (`110eab7`, `cd0e518`, `4b9ea05`, `1cc7fa1`, `3e2dcc1`) implementing
+  [ADR-0007](../adrs/0007-line-geometry-generators.md) (now **accepted**). Added a **line-art
+  category** to the built-in vocabulary on one shared `LineRenderer` (segments → thick glowing
+  instanced quads, additive blend, fixed 20k-segment buffer) under two build models: a **parametric**
+  system (`ParametricCurveScene`, the Maurer rose sampled per frame, allocation-free into a
+  preallocated buffer) and a **generator** system built + cached at preset load
+  (`LSystemScene`: grammar rewrite + turtle-walk cached per depth `1..=max_depth`; `StarPatternScene`:
+  Hankin contact-angle rosette with precomputed variants). The `Scene` trait grew by **exactly one**
+  optional off-hot-path method (`configure(&GeneratorConfig)`, default no-op) — the single widening
+  ADR-0007 sanctions — invoked once at preset load from `configure_active_scene`. New optional
+  `[curve]`/`[generator]` TOML tables validated at the load boundary (`schema.rs`), 7 curated presets
+  (4 roses, 2 L-systems, 1 star) embedded + seeded, and a `presets/README.md` authoring note.
+  Verified: `cargo test -p lmv-core` green — grammar exact-string (incl. Koch depth-2), turtle
+  cap-truncates-and-reports, Hankin segment-count + 2π/n rotational symmetry, zero-per-frame-alloc,
+  and bad-`[curve]`/`[generator]`-config rejection, all present and non-tautological; clippy
+  `-D warnings` clean; hygiene guard covers all nine new `lines/*.rs` panic pragmas. **C ABI untouched
+  (still v3).** **⚠ Carry-forward (minor, non-blocking):** (1) `LSystemScene::overflow()` and the
+  parametric `samples` clamp *track* the segment-cap drop but nothing *surfaces* it at load — the
+  plan's "never a silent cut" is unmet in the surfacing half (latent: shipped fern peaks ~6k/20k).
+  (2) `presets/README.md` says `max_depth` is "clamped to 1..=7" but schema rejects `>7` as a load
+  error. (3) `parametric` `configure` is skipped when `[curve]` is omitted, so `family` doesn't reset
+  (harmless with one family). (4) `lsystem_fern` `visible_depth` only bumps depth at `bass == 1.0`
+  exactly — an on-device tuning nit. The iGPU 60 fps @ 1080p confirmation is the standing hardware
+  carry-forward (`docs/on-device-validation.md`).
 
 - [0013 — Headless scene capture + differential visual QA + golden images + shot CLI](done/0013-headless-scene-capture.md) —
   **done 2026-07-22**, passed Mode 4 review (no blockers, no majors; one minor, one nit). Eight

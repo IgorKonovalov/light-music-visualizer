@@ -1,9 +1,31 @@
 # 0010 — Line-geometry scenes: parametric curves, L-systems, star patterns
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-21
+> **Closed:** 2026-07-23
 > **Owner skill(s):** dev
-> **Related ADRs:** [0007-line-geometry-generators](../adrs/0007-line-geometry-generators.md); extends [0002-layered-preset-architecture](../adrs/0002-layered-preset-architecture.md) layer 2
+> **Related ADRs:** [0007-line-geometry-generators](../adrs/0007-line-geometry-generators.md) (accepted at close); extends [0002-layered-preset-architecture](../adrs/0002-layered-preset-architecture.md) layer 2
+
+> **Close summary (2026-07-23, Mode 4 — no blockers, no majors).** All five phases
+> landed: `110eab7` (line renderer + static Maurer rose), `cd0e518` (parametric
+> presets + audio sweep + the optional `Scene::configure` hook), `4b9ea05` (L-system
+> generator: grammar + turtle + cached-per-depth build), `1cc7fa1` (Hankin star
+> generator + contact-angle variants), `3e2dcc1` (7 curated presets across all three
+> families + `presets/README.md` authoring note). Verified: `cargo test -p lmv-core`
+> green (grammar exact-string, turtle cap-report, Hankin count + 2π/n-symmetry,
+> zero-per-frame-alloc, bad-config rejection all present and non-tautological); clippy
+> `-D warnings` clean; hygiene guard covers all nine new `lines/*.rs` panic pragmas.
+> The `Scene` trait grew by exactly one optional no-op method (`configure`) per
+> ADR-0007; **C ABI untouched (v3)**. **Carry-forward (minor, non-blocking):**
+> (1) `LSystemScene::overflow()` and the `parametric` `samples` clamp track the
+> segment-cap drop but nothing surfaces it at load — the plan's "never a silent cut"
+> requirement is unmet in the surfacing half; latent since shipped presets stay under
+> the cap (fern peaks ~6k/20k). (2) `presets/README.md` says `max_depth` is "clamped
+> to 1..=7" but schema rejects `>7` as a load error. (3) `parametric` `configure` is
+> skipped when `[curve]` is omitted, so `family` doesn't reset — harmless with one
+> family, latent when more land. (4) `lsystem_fern` `visible_depth` only bumps depth
+> at `bass == 1.0` exactly (on-device tuning nit). The iGPU 60 fps @ 1080p check is
+> the standing hardware carry-forward (`docs/on-device-validation.md`).
 
 ## TL;DR
 
