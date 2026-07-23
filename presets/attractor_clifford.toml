@@ -1,0 +1,21 @@
+# Clifford - a second 2D strange attractor on the GPU compute-particle scene
+# (ADR-0015, Plan 0016). Same engine as De Jong, a different map: the Clifford
+# recurrence traces broad ribbony loops that read quite unlike De Jong's mesh.
+# The family is selected data-driven via the [particles] table - no engine edit.
+#
+# The coefficients stay at the family default (a canonical Clifford); the bands
+# drive the look: bass swells the points and the beat glow, mid lengthens the
+# trails, treble drifts the hue, and each beat re-scatters the cloud.
+#
+# Variables available to expressions: bass mid treb onset beat bar time.
+system = "attractor"
+name = "Clifford"
+
+[particles]
+family = "clifford"
+
+[params]
+size   = "1.0 + clamp(bass * 3, 0, 1) * 0.7 + beat * 0.4"
+hue    = "0.35 + time * 0.04 + clamp(treb * 2, 0, 1) * 0.18"
+fade   = "0.90 + clamp(mid * 2, 0, 1) * 0.06"
+reseed = "beat"

@@ -65,11 +65,13 @@ impl CurveFamily {
     }
 }
 
-/// Declarative structural config a line scene consumes once at preset load
+/// Declarative structural config a scene consumes once at preset load
 /// (ADR-0007): **not** expressions — the family / grammar / tiling the sampler
 /// or generator builds from. Delivered through the optional
-/// [`Scene::configure`](super::Scene::configure) hook, off the hot path.
-/// Extended by later phases with the L-system and star-pattern variants.
+/// [`Scene::configure`](super::Scene::configure) hook, off the hot path. This is
+/// the shared structural-config enum for every scene that has one: the line
+/// scenes' curve/L-system/star variants, plus the compute-particle attractor
+/// family (Plan 0016) — it is not line-specific despite living here.
 #[derive(Debug, Clone)]
 pub enum GeneratorConfig {
     /// A parametric curve: which family to sample.
@@ -99,6 +101,13 @@ pub enum GeneratorConfig {
         order: u32,
         /// Contact angle in degrees; variants are precomputed around it.
         contact_angle_deg: f32,
+    },
+    /// A GPU compute-particle attractor (Plan 0016): which strange-attractor map
+    /// the compute step iterates. Not a line scene — reuses this shared enum so
+    /// the family rides the existing `configure` hook (no new trait method).
+    Particles {
+        /// The attractor family (De Jong, Clifford, Thomas, Lorenz).
+        family: super::particles::AttractorFamily,
     },
 }
 

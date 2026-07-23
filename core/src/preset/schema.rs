@@ -14,6 +14,7 @@ use serde::Deserialize;
 
 use super::expr::{self, Expr, ExprError};
 use crate::render::scenes::lines::{CurveFamily, GeneratorConfig, MAX_LSYSTEM_DEPTH, hankin};
+use crate::render::scenes::particles::AttractorFamily;
 
 /// The built-in system a preset drives. Extend as Plan 0003 (and later plans)
 /// add systems; unknown names are rejected at load.
@@ -95,9 +96,8 @@ impl Preset {
 
         // Structural config: validated once here (a bad family/grammar -> load
         // error, the caller keeps the last good preset), then trusted by the
-        // scene. Built per system so each reads the right `[curve]`/`[generator]`
-        // table.
-        let config = build_config(system, raw.curve, raw.generator)?;
+        // scene. Built per system so each reads the right table.
+        let config = build_config(system, raw.curve, raw.generator, raw.particles)?;
 
         Ok(Preset {
             name,
@@ -114,6 +114,7 @@ fn build_config(
     system: SystemKind,
     curve: Option<RawCurve>,
     generator: Option<RawGenerator>,
+    particles: Option<RawParticles>,
 ) -> Result<Option<GeneratorConfig>, PresetError> {
     match system {
         // A curve preset without a `[curve]` table accepts the family default.
@@ -131,14 +132,21 @@ fn build_config(
             })?;
             Ok(Some(g.into_star()?))
         }
+        // The attractor scene selects its map via an optional `[particles]` table;
+        // absent, it defaults to De Jong. Config is always `Some` so `configure`
+        // runs on every preset switch (resetting the family — never stale).
+        SystemKind::Attractor => {
+            let family = match particles {
+                Some(p) => AttractorFamily::from_name(&p.family).ok_or_else(|| {
+                    PresetError::Config(format!("unknown attractor family '{}'", p.family))
+                })?,
+                None => AttractorFamily::DeJong,
+            };
+            Ok(Some(GeneratorConfig::Particles { family }))
+        }
         // Reaction-diffusion drives its regime through named params (feed/kill/
-        // flow, Phase 3), not a declarative structural table. The attractor scene
-        // is params-only in Phase 1 (its `[particles]` family table lands in
-        // Plan 0016 Phase 4).
-        SystemKind::FragmentField
-        | SystemKind::Swarm
-        | SystemKind::ReactionDiffusion
-        | SystemKind::Attractor => Ok(None),
+        // flow), not a declarative structural table.
+        SystemKind::FragmentField | SystemKind::Swarm | SystemKind::ReactionDiffusion => Ok(None),
     }
 }
 
@@ -158,6 +166,18 @@ struct RawPreset {
     /// generator presets (L-system, star pattern).
     #[serde(default)]
     generator: Option<RawGenerator>,
+    /// The optional `[particles]` structural-config table (Plan 0016), selecting
+    /// the attractor family for the compute-particle scene.
+    #[serde(default)]
+    particles: Option<RawParticles>,
+}
+
+/// The raw `[particles]` table: which strange-attractor family the
+/// compute-particle scene iterates.
+#[derive(Deserialize)]
+struct RawParticles {
+    /// Attractor family name (e.g. `"lorenz"`); validated at load.
+    family: String,
 }
 
 /// The raw `[curve]` table: declarative structure for a parametric-curve scene.

@@ -1,0 +1,21 @@
+# Thomas - a cyclically-symmetric 3D flow on the GPU compute-particle scene
+# (ADR-0015, Plan 0016). Particles integrate the Thomas equations, tracing a
+# soft, rounded lattice that turns slowly in depth - gentler than Lorenz's
+# butterfly. A continuous flow, so it moves on its own even in silence.
+#
+# The dissipation coefficient stays at its canonical value; the bands drive the
+# look: bass swells the points, mid lengthens the trails, treble drifts the hue,
+# and each beat re-blooms the cloud.
+#
+# Variables available to expressions: bass mid treb onset beat bar time.
+system = "attractor"
+name = "Thomas"
+
+[particles]
+family = "thomas"
+
+[params]
+size   = "1.0 + clamp(bass * 3, 0, 1) * 0.6 + beat * 0.4"
+hue    = "0.15 + time * 0.03 + clamp(treb * 2, 0, 1) * 0.22 + clamp(bass * 2, 0, 1) * 0.10"
+fade   = "0.92 + clamp(mid * 2, 0, 1) * 0.05"
+reseed = "beat"

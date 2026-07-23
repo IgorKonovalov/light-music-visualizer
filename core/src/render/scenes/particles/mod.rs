@@ -53,9 +53,6 @@ use crate::render::feedback::PingPongField;
 const PARTICLE_COUNT: u32 = 50_000;
 /// Compute workgroup size (1D). 64 is a safe, portable default across DX12/Metal.
 const WORKGROUP: u32 = 64;
-/// Seeded initial scatter half-extent. Points converge onto the attractor within
-/// a few iterations regardless, so a modest starting box is enough (NFR 6).
-const INIT_SPREAD: f32 = 1.5;
 const SEED: u64 = 0x4C4D_5641_5454_5231; // "LMVATTR1"
 
 /// Fixed 16:9 accumulation grid the trails live on, decoupled from the surface
@@ -77,12 +74,84 @@ const FIXED_STEP: f32 = 1.0 / 60.0;
 /// reaction-diffusion scene does). One step per frame is the norm at 60 fps.
 const MAX_SUBSTEPS: u32 = 6;
 
-/// De Jong attractor coefficients (Phase 1 hardcodes this classic set; Phase 3
-/// exposes them as named params). The map is bounded in ~[-2, 2].
-const DEJONG_A: f32 = 1.641;
-const DEJONG_B: f32 = 1.902;
-const DEJONG_C: f32 = 0.316;
-const DEJONG_D: f32 = 1.525;
+/// Which strange-attractor map the compute step iterates. Selected data-driven
+/// via the optional `[particles]` config table (ADR-0007 `configure` hook); the
+/// default is De Jong. Extend as follow-up plans add maps; unknown names are
+/// rejected at load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttractorFamily {
+    /// De Jong — a 2D discrete map, bounded in ~[-2, 2].
+    DeJong,
+    /// Clifford — a 2D discrete map, bounded in ~[-2, 2].
+    Clifford,
+    /// Thomas — a 3D cyclically-symmetric continuous flow.
+    Thomas,
+    /// Lorenz — the 3D convection flow (the butterfly), projected to 2D.
+    Lorenz,
+}
+
+impl AttractorFamily {
+    /// Parse a `[particles] family` name, or `None` if unknown.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "de_jong" => AttractorFamily::DeJong,
+            "clifford" => AttractorFamily::Clifford,
+            "thomas" => AttractorFamily::Thomas,
+            "lorenz" => AttractorFamily::Lorenz,
+            _ => return None,
+        })
+    }
+
+    /// The compute shader's family selector.
+    fn shader_id(self) -> u32 {
+        match self {
+            AttractorFamily::DeJong => 0,
+            AttractorFamily::Clifford => 1,
+            AttractorFamily::Thomas => 2,
+            AttractorFamily::Lorenz => 3,
+        }
+    }
+
+    /// Default coefficients for the family — the meaning is family-specific
+    /// (discrete a,b,c,d; Lorenz sigma,rho,beta; Thomas dissipation in `a`). A
+    /// preset's coefficient params modulate around these; unbound falls back here.
+    fn default_coeffs(self) -> [f32; 4] {
+        match self {
+            AttractorFamily::DeJong => [1.641, 1.902, 0.316, 1.525],
+            AttractorFamily::Clifford => [-1.4, 1.6, 1.0, 0.7],
+            AttractorFamily::Thomas => [0.19, 0.0, 0.0, 0.0],
+            AttractorFamily::Lorenz => [10.0, 28.0, 2.6667, 0.0],
+        }
+    }
+
+    /// Projection: (world scale, dim 2/3, z-centre to subtract). The scale fits
+    /// each attractor's native extent into the frame; 3D flows subtract a z-centre
+    /// so the spin pivots on the body.
+    fn projection(self) -> (f32, f32, f32) {
+        match self {
+            AttractorFamily::DeJong => (0.42, 2.0, 0.0),
+            AttractorFamily::Clifford => (0.42, 2.0, 0.0),
+            AttractorFamily::Thomas => (0.14, 3.0, 0.0),
+            AttractorFamily::Lorenz => (0.022, 3.0, 25.0),
+        }
+    }
+
+    /// The seeded initial-scatter box: `(half-spread, centre)` per axis. Sized to
+    /// the attractor's native extent so particles start spread **across** it —
+    /// a box too small for a chaotic flow leaves every particle on nearly the same
+    /// trajectory, so the cloud clumps instead of filling the shape. The discrete
+    /// 2D maps converge from any small box, so theirs is the historical ~[-1.5,1.5]
+    /// (kept identical so their seeded look is unchanged; `z` is unused there).
+    fn seed_box(self) -> ([f32; 3], [f32; 3]) {
+        match self {
+            AttractorFamily::DeJong | AttractorFamily::Clifford => {
+                ([1.5, 1.5, 1.5], [0.0, 0.0, 0.0])
+            }
+            AttractorFamily::Thomas => ([4.5, 4.5, 4.5], [0.0, 0.0, 0.0]),
+            AttractorFamily::Lorenz => ([20.0, 26.0, 24.0], [0.0, 0.0, 25.0]),
+        }
+    }
+}
 
 /// Slow display rotation (rad/s) driven by the scene clock, so the cloud visibly
 /// turns even when the point set saturates its footprint — the animation
@@ -104,24 +173,29 @@ const POINT_BASE: f32 = 0.006;
 /// sustained beat flag doesn't re-scatter every frame).
 const RESEED_THRESHOLD: f32 = 0.5;
 
-/// Compute step: iterate every particle through the attractor map once. Writes
-/// the storage buffer in place; the draw pass then reads it as a vertex buffer.
+/// Compute step: iterate every particle through the selected attractor map once.
+/// Discrete maps (De Jong, Clifford) iterate directly; continuous flows (Thomas,
+/// Lorenz) Euler-integrate a few sub-steps of the fixed frame `dt`. Writes the
+/// storage buffer in place; the draw pass then reads it as a vertex buffer.
 const STEP_SHADER: &str = r#"
 struct Particle {
-    pos: vec2<f32>,
-    age: f32,
+    pos: vec3<f32>,
     seed: f32,
 }
 @group(0) @binding(0) var<storage, read_write> particles: array<Particle>;
 
 struct Step {
-    coeffs: vec4<f32>, // a, b, c, d
+    coeffs: vec4<f32>, // discrete: a,b,c,d; Lorenz: sigma,rho,beta; Thomas: b
     dt: f32,           // fixed sub-step seconds (for continuous families)
-    family: u32,       // which attractor map (Phase 1: 0 = De Jong)
+    family: u32,       // 0 De Jong, 1 Clifford, 2 Thomas, 3 Lorenz
     count: u32,        // active particle count
     pad: u32,
 }
 @group(0) @binding(1) var<uniform> step: Step;
+
+// Euler sub-steps per frame for the continuous (ODE) families, so a stiff flow
+// (Lorenz) stays stable at the frame dt without a per-family clock.
+const ODE_SUBSTEPS: i32 = 4;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -133,23 +207,46 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let b = step.coeffs.y;
     let c = step.coeffs.z;
     let d = step.coeffs.w;
-    let p = particles[i].pos;
-    // De Jong map: x' = sin(a*y) - cos(b*x), y' = sin(c*x) - cos(d*y).
-    let nx = sin(a * p.y) - cos(b * p.x);
-    let ny = sin(c * p.x) - cos(d * p.y);
-    particles[i].pos = vec2<f32>(nx, ny);
-    particles[i].age = particles[i].age + 1.0;
+    var p = particles[i].pos;
+
+    if (step.family == 0u) {
+        // De Jong: x' = sin(a*y) - cos(b*x), y' = sin(c*x) - cos(d*y).
+        p = vec3<f32>(sin(a * p.y) - cos(b * p.x), sin(c * p.x) - cos(d * p.y), 0.0);
+    } else if (step.family == 1u) {
+        // Clifford: x' = sin(a*y) + c*cos(a*x), y' = sin(b*x) + d*cos(b*y).
+        p = vec3<f32>(sin(a * p.y) + c * cos(a * p.x), sin(b * p.x) + d * cos(b * p.y), 0.0);
+    } else if (step.family == 2u) {
+        // Thomas cyclically-symmetric flow (b = dissipation). Lively speed-up so
+        // the slow flow visibly moves each frame.
+        let h = step.dt * 3.0 / f32(ODE_SUBSTEPS);
+        for (var s = 0; s < ODE_SUBSTEPS; s = s + 1) {
+            let dp = vec3<f32>(sin(p.y) - a * p.x, sin(p.z) - a * p.y, sin(p.x) - a * p.z);
+            p = p + dp * h;
+        }
+    } else {
+        // Lorenz (sigma, rho, beta). Euler-integrated in sub-steps for stability.
+        let h = step.dt / f32(ODE_SUBSTEPS);
+        for (var s = 0; s < ODE_SUBSTEPS; s = s + 1) {
+            let dp = vec3<f32>(a * (p.y - p.x), p.x * (b - p.z) - p.y, p.x * p.y - c * p.z);
+            p = p + dp * h;
+        }
+    }
+
+    particles[i].pos = p;
 }
 "#;
 
 /// Draw pass: one additive glowing point-sprite per particle, into the trail
 /// field. The particle storage buffer is bound as an instance vertex buffer; the
-/// shader expands each into a screen-facing quad and tints it from the seeded
+/// shader expands each into a screen-facing quad, projects the (2D or 3D)
+/// attractor state to the screen with a slow spin, and tints it from the seeded
 /// per-particle offset.
 const DRAW_SHADER: &str = r#"
 struct Draw {
-    // x: aspect, y: point half-size (world), z: hue offset, w: display rotation
+    // v: x aspect, y point half-size (world), z hue offset, w spin (radians)
+    // w: x world scale, y dim (2 or 3), z z-center to subtract (3D), w unused
     v: vec4<f32>,
+    w: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> draw: Draw;
 
@@ -172,9 +269,8 @@ fn palette(t: f32) -> vec3<f32> {
 @vertex
 fn vs_main(
     @builtin(vertex_index) vi: u32,
-    @location(0) center: vec2<f32>,
-    @location(1) age: f32,
-    @location(2) seed: f32,
+    @location(0) center: vec3<f32>,
+    @location(1) seed: f32,
 ) -> VsOut {
     var corners = array<vec2<f32>, 6>(
         vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
@@ -185,11 +281,23 @@ fn vs_main(
     let psize = draw.v.y;
     let hue = draw.v.z;
     let rot = draw.v.w;
+    let scl = draw.w.x;
+    let dim = draw.w.y;
+    let zc = draw.w.z;
 
     let cs = cos(rot);
     let sn = sin(rot);
-    let r = vec2<f32>(center.x * cs - center.y * sn, center.x * sn + center.y * cs);
-    let world = r * 0.42 + corner * psize;
+    var screen: vec2<f32>;
+    if (dim < 2.5) {
+        // 2D map: in-plane rotation.
+        screen = vec2<f32>(center.x * cs - center.y * sn, center.x * sn + center.y * cs);
+    } else {
+        // 3D flow: centre, rotate around the vertical axis, orthographic project.
+        let cx = center.x;
+        let cz = center.z - zc;
+        screen = vec2<f32>(cx * cs + cz * sn, center.y);
+    }
+    let world = screen * scl + corner * psize;
 
     var out: VsOut;
     out.pos = vec4<f32>(world.x / aspect, world.y, 0.0, 1.0);
@@ -268,13 +376,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
-/// One particle, GPU storage-buffer layout (std430). 16 bytes: a 2D attractor
-/// position, an age counter, and a per-particle seed jitter set once at init.
+/// One particle, GPU storage-buffer layout (std430). 16 bytes: a 3D attractor
+/// position (2D families keep `z = 0`) and a per-particle seed jitter set once at
+/// init. The `f32` packs into the `vec3`'s trailing slot (offset 12), so the
+/// std430 stride is a tight 16 — matching this `repr(C)` layout.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Particle {
-    pos: [f32; 2],
-    age: f32,
+    pos: [f32; 3],
     seed: f32,
 }
 
@@ -290,12 +399,13 @@ struct StepUniform {
     pad: u32,
 }
 
-/// Draw uniform (per frame): x aspect, y point half-size, z hue offset, w
-/// display rotation.
+/// Draw uniform (per frame). `v`: x aspect, y point half-size, z hue offset, w
+/// spin. `w`: x world scale, y projection dim (2 or 3), z z-centre (3D), w unused.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct DrawUniform {
     v: [f32; 4],
+    w: [f32; 4],
 }
 
 /// Decay uniform (per frame): x is the per-frame trail retention factor.
@@ -433,9 +543,8 @@ impl Resources {
                     array_stride: std::mem::size_of::<Particle>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x2, // pos
-                        1 => Float32,   // age
-                        2 => Float32,   // seed
+                        0 => Float32x3, // pos (z = 0 for 2D families)
+                        1 => Float32,   // seed
                     ],
                 })],
             },
@@ -741,8 +850,11 @@ pub struct AttractorScene {
     dt: f32,
     /// Shared scene clock (seconds), set by the renderer each frame.
     time: f32,
-    /// Attractor coefficients (De Jong `a`,`b`,`c`,`d`) — named params, so a
-    /// preset can steer the cloud's shape with the bands.
+    /// The active attractor map, selected data-driven via `[particles]`
+    /// (ADR-0007 `configure`); its default coefficients seed `a`..`d`.
+    family: AttractorFamily,
+    /// Attractor coefficients — named params, so a preset can steer the cloud's
+    /// shape with the bands. Their meaning is family-specific.
     a: f32,
     b: f32,
     c: f32,
@@ -761,7 +873,9 @@ impl AttractorScene {
     /// Build the CPU-side seeded scatter. GPU resources are deferred to the first
     /// render (module docs).
     pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
-        let seed_particles = Self::seed();
+        let family = AttractorFamily::DeJong;
+        let seed_particles = Self::seed(family);
+        let [a, b, c, d] = family.default_coeffs();
         Self {
             device: device.clone(),
             surface_format,
@@ -773,10 +887,11 @@ impl AttractorScene {
             pending_steps: 0,
             dt: FIXED_STEP,
             time: 0.0,
-            a: DEJONG_A,
-            b: DEJONG_B,
-            c: DEJONG_C,
-            d: DEJONG_D,
+            family,
+            a,
+            b,
+            c,
+            d,
             size: DEFAULT_SIZE,
             hue: DEFAULT_HUE,
             fade: DEFAULT_FADE,
@@ -788,18 +903,32 @@ impl AttractorScene {
     /// The deterministic initial particle set: a seeded scatter in a small box,
     /// each with a per-particle hue jitter. Points converge onto the attractor
     /// within a few iterations, so the starting positions only need to differ.
-    fn seed() -> Vec<Particle> {
+    ///
+    /// The `x`/`y`/`seed` draws come first (their order matches the earlier 2D
+    /// scatter, so De Jong/Clifford stay byte-identical across the 3D upgrade),
+    /// then `z` is drawn in a second pass for the 3D families.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "spread/centre/pos index fixed [f32; 3] at constant offsets, always in-bounds"
+    )]
+    fn seed(family: AttractorFamily) -> Vec<Particle> {
+        let (spread, center) = family.seed_box();
         let mut rng = SeededRng::new(SEED);
-        (0..PARTICLE_COUNT)
-            .map(|_| Particle {
-                pos: [
-                    rng.range(-INIT_SPREAD, INIT_SPREAD),
-                    rng.range(-INIT_SPREAD, INIT_SPREAD),
-                ],
-                age: 0.0,
-                seed: rng.next_f32(),
+        let mut particles: Vec<Particle> = (0..PARTICLE_COUNT)
+            .map(|_| {
+                let x = center[0] + rng.range(-spread[0], spread[0]);
+                let y = center[1] + rng.range(-spread[1], spread[1]);
+                let seed = rng.next_f32();
+                Particle {
+                    pos: [x, y, 0.0],
+                    seed,
+                }
             })
-            .collect()
+            .collect();
+        for p in &mut particles {
+            p.pos[2] = center[2] + rng.range(-spread[2], spread[2]);
+        }
+        particles
     }
 }
 
@@ -828,12 +957,14 @@ impl Scene for AttractorScene {
     }
 
     fn reset_params(&mut self) {
-        // Defaults are the calm De Jong look, so an unbound preset (or a param a
-        // preset leaves out) falls back here rather than leaking last frame's.
-        self.a = DEJONG_A;
-        self.b = DEJONG_B;
-        self.c = DEJONG_C;
-        self.d = DEJONG_D;
+        // Defaults are the active family's canonical coefficients + the calm look,
+        // so an unbound preset (or a param a preset leaves out) falls back here
+        // rather than leaking last frame's.
+        let [a, b, c, d] = self.family.default_coeffs();
+        self.a = a;
+        self.b = b;
+        self.c = c;
+        self.d = d;
         self.size = DEFAULT_SIZE;
         self.hue = DEFAULT_HUE;
         self.fade = DEFAULT_FADE;
@@ -865,6 +996,33 @@ impl Scene for AttractorScene {
         self.prev_reseed = self.reseed;
     }
 
+    /// Select the attractor family from the preset's `[particles]` table (ADR-0007
+    /// `configure`, off the hot path). Reuses the shared [`GeneratorConfig`] enum
+    /// rather than a new trait method. A family change re-scatters and clears the
+    /// trail so the new attractor forms cleanly rather than iterating the old
+    /// family's points. Never truncates, so it never reports a [`CapOverflow`].
+    fn configure(
+        &mut self,
+        cfg: &super::lines::GeneratorConfig,
+    ) -> Option<super::lines::CapOverflow> {
+        if let super::lines::GeneratorConfig::Particles { family } = cfg
+            && *family != self.family
+        {
+            self.family = *family;
+            let [a, b, c, d] = family.default_coeffs();
+            self.a = a;
+            self.b = b;
+            self.c = c;
+            self.d = d;
+            // Re-seed with the new family's box (its scale differs) and clear the
+            // trail so the new attractor forms cleanly.
+            self.seed_particles = Self::seed(*family);
+            self.needs_upload = true;
+            self.needs_clear = true;
+        }
+        None
+    }
+
     fn render(
         &mut self,
         queue: &wgpu::Queue,
@@ -883,6 +1041,7 @@ impl Scene for AttractorScene {
             pending_steps,
             dt,
             time,
+            family,
             a,
             b,
             c,
@@ -915,11 +1074,12 @@ impl Scene for AttractorScene {
             bytemuck::bytes_of(&StepUniform {
                 coeffs: [*a, *b, *c, *d],
                 dt: FIXED_STEP,
-                family: 0,
+                family: family.shader_id(),
                 count: PARTICLE_COUNT,
                 pad: 0,
             }),
         );
+        let (scale, dim, z_center) = family.projection();
         queue.write_buffer(
             &res.draw_uniform,
             0,
@@ -930,6 +1090,7 @@ impl Scene for AttractorScene {
                     *hue,
                     *time * SPIN_RATE,
                 ],
+                w: [scale, dim, z_center, 0.0],
             }),
         );
         // Frame-rate-independent trail decay: retain `fade` per 1/60 s, raised to

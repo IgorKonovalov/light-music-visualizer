@@ -1,0 +1,21 @@
+# Lorenz - the classic butterfly, as a 3D GPU compute-particle flow (ADR-0015,
+# Plan 0016). Particles Euler-integrate the Lorenz convection equations each
+# frame and the whole 3D cloud slowly turns, so the two lobes read in depth. A
+# continuous flow, so it drifts on its own even in silence.
+#
+# The sigma/rho/beta coefficients stay at the canonical values; the bands drive
+# the look: bass swells the points, mid lengthens the trails, treble drifts the
+# hue, and each beat re-blooms the cloud.
+#
+# Variables available to expressions: bass mid treb onset beat bar time.
+system = "attractor"
+name = "Lorenz"
+
+[particles]
+family = "lorenz"
+
+[params]
+size   = "0.9 + clamp(bass * 3, 0, 1) * 0.6 + beat * 0.4"
+hue    = "0.55 + time * 0.03 + clamp(treb * 2, 0, 1) * 0.22 + clamp(bass * 2, 0, 1) * 0.12"
+fade   = "0.93 + clamp(mid * 2, 0, 1) * 0.05"
+reseed = "beat"

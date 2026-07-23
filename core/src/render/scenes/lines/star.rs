@@ -146,7 +146,9 @@ impl Scene for StarPatternScene {
                 order,
                 contact_angle_deg,
             } => self.build(*order, *contact_angle_deg),
-            GeneratorConfig::Curve { .. } | GeneratorConfig::LSystem { .. } => {}
+            GeneratorConfig::Curve { .. }
+            | GeneratorConfig::LSystem { .. }
+            | GeneratorConfig::Particles { .. } => {}
         }
         // A rosette is `2 * n` segments for the small regular tilings v1 allows
         // (n <= 12), far under the cap — no truncation to surface.

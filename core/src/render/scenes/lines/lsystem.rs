@@ -158,7 +158,9 @@ impl Scene for LSystemScene {
                 max_depth,
                 seed: _,
             } => self.build(axiom, rules, *angle_deg, *max_depth),
-            GeneratorConfig::Curve { .. } | GeneratorConfig::Star { .. } => {}
+            GeneratorConfig::Curve { .. }
+            | GeneratorConfig::Star { .. }
+            | GeneratorConfig::Particles { .. } => {}
         }
         // Surface a cap truncation so the frontend can report it — never a
         // silent cut (ADR-0007). `None` when every depth fit (the norm).
