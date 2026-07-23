@@ -49,6 +49,31 @@ const SYSTEMS: &[SystemKind] = &[
     SystemKind::Attractor,
 ];
 
+/// The number of `SystemKind` variants, asserted against `SYSTEMS.len()` by
+/// [`systems_rosters_every_variant`]. This closes the Plan 0022 half-enforced
+/// gap (folded into Plan 0016 Phase 5): the exhaustive [`fixture`] match forces a
+/// new variant to add a fixture *arm*, but nothing forced it into `SYSTEMS`, so a
+/// scene could compile green yet never be rendered/compared. Kept honest by
+/// [`variant_count_reminder`] below — a new variant fails the build there until
+/// this count is bumped and the variant is added to `SYSTEMS`.
+const VARIANT_COUNT: usize = 7;
+
+/// Compile-time reminder (never called): adding a `SystemKind` variant makes this
+/// exhaustive match non-exhaustive and fails the build, prompting the dev to bump
+/// [`VARIANT_COUNT`] and add the variant to [`SYSTEMS`] (and its [`fixture`]).
+#[allow(dead_code)]
+fn variant_count_reminder(system: SystemKind) {
+    match system {
+        SystemKind::FragmentField
+        | SystemKind::Swarm
+        | SystemKind::ParametricCurve
+        | SystemKind::LSystem
+        | SystemKind::StarPattern
+        | SystemKind::ReactionDiffusion
+        | SystemKind::Attractor => {}
+    }
+}
+
 /// The frozen fixture for a system: its baseline file stem (the system name) and
 /// the fixture TOML compiled into the test binary.
 ///
@@ -197,4 +222,36 @@ fn scenes_match_golden_baselines() {
         failures.is_empty(),
         "golden drift beyond tolerance (bless with LMV_BLESS=1 if intended): {failures:#?}"
     );
+}
+
+/// Structural coverage guard (Plan 0016 Phase 5, closing the Plan 0022 followup):
+/// a variant added to the exhaustive [`fixture`] match but forgotten in
+/// [`SYSTEMS`] would render zero baselines and pass `scenes_match_golden_baselines`
+/// silently. Assert `SYSTEMS` holds exactly [`VARIANT_COUNT`] distinct systems,
+/// each with a valid, distinctly-named fixture — so removing a system from
+/// `SYSTEMS` (or adding a variant without rostering it) fails the suite. No GPU,
+/// so it runs everywhere (not skipped on an adapterless runner).
+#[test]
+fn systems_rosters_every_variant() {
+    assert_eq!(
+        SYSTEMS.len(),
+        VARIANT_COUNT,
+        "SYSTEMS is missing a SystemKind (or VARIANT_COUNT is stale) — every \
+         variant must be in the drift roster, not just have a fixture() arm"
+    );
+
+    let mut seen: Vec<SystemKind> = Vec::new();
+    let mut stems: Vec<&str> = Vec::new();
+    for &system in SYSTEMS {
+        assert!(!seen.contains(&system), "duplicate entry in SYSTEMS");
+        seen.push(system);
+        let (stem, toml) = fixture(system);
+        assert!(
+            !stems.contains(&stem),
+            "duplicate fixture stem {stem} in SYSTEMS"
+        );
+        stems.push(stem);
+        Preset::from_toml_str(toml)
+            .unwrap_or_else(|e| panic!("golden fixture {stem}.toml is invalid: {e}"));
+    }
 }
