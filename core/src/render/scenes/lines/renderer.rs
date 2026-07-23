@@ -40,11 +40,14 @@ pub struct SegmentInstance {
 struct Uniforms {
     // x: aspect, y: glow multiplier, zw: unused
     v: [f32; 4],
+    // x: zoom, yz: pan, w: unused — the shared ViewTransform (ADR-0018)
+    view: [f32; 4],
 }
 
 const SHADER: &str = r#"
 struct Uniforms {
     v: vec4<f32>,
+    view: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -72,10 +75,17 @@ fn vs_main(
     let aspect = max(u.v.x, 0.1);
     let inv_aspect = 1.0 / aspect;
 
+    // Shared ViewTransform (ADR-0018): zoom about the frame centre, then pan, in
+    // world space before the aspect divide. Endpoints move; stroke width does not.
+    let zoom = u.view.x;
+    let pan = u.view.yz;
+    let a_v = a * zoom + pan;
+    let b_v = b * zoom + pan;
+
     // Work in aspect-corrected space so the perpendicular offset is a uniform
     // on-screen thickness whatever the segment's orientation.
-    let a_s = vec2<f32>(a.x * inv_aspect, a.y);
-    let b_s = vec2<f32>(b.x * inv_aspect, b.y);
+    let a_s = vec2<f32>(a_v.x * inv_aspect, a_v.y);
+    let b_s = vec2<f32>(b_v.x * inv_aspect, b_v.y);
     var dir = b_s - a_s;
     let len = length(dir);
     if (len > 1e-6) {
@@ -228,12 +238,14 @@ impl LineRenderer {
     }
 
     /// Clear `view` to `clear` and draw `segments` as thick glowing quads at the
-    /// given `aspect` and `glow` multiplier. Segments beyond [`capacity`] are
-    /// dropped defensively (the scene is responsible for capping at load).
+    /// given `aspect` and `glow` multiplier, under the shared `xform` camera
+    /// transform (zoom/pan, ADR-0018). Segments beyond [`capacity`] are dropped
+    /// defensively (the scene is responsible for capping at load).
     #[allow(
         clippy::too_many_arguments,
-        reason = "distinct GPU handles plus the per-frame draw parameters (aspect, glow, clear); \
-                  bundling them would only shuffle the same values behind a one-use struct"
+        reason = "distinct GPU handles plus the per-frame draw parameters (aspect, glow, clear, \
+                  view transform); bundling them would only shuffle the same values behind a \
+                  one-use struct"
     )]
     pub fn draw(
         &mut self,
@@ -243,6 +255,7 @@ impl LineRenderer {
         aspect: f32,
         glow: f32,
         clear: wgpu::Color,
+        xform: super::ViewTransform,
         segments: &[SegmentInstance],
     ) {
         let count = segments.len().min(self.capacity);
@@ -255,6 +268,7 @@ impl LineRenderer {
             0,
             bytemuck::bytes_of(&Uniforms {
                 v: [aspect.max(0.1), glow, 0.0, 0.0],
+                view: [xform.zoom, xform.pan[0], xform.pan[1], 0.0],
             }),
         );
 

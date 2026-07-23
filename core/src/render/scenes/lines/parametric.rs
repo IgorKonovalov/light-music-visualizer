@@ -19,7 +19,9 @@ use std::rc::Rc;
 
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
-use super::{CapOverflow, CurveFamily, GeneratorConfig, MAX_SEGMENTS, curves, palette};
+use super::{
+    CapOverflow, CurveFamily, GeneratorConfig, MAX_SEGMENTS, ViewTransform, curves, palette,
+};
 use crate::dsp::AnalysisFrame;
 
 /// Maps the `thickness` parameter (a small integer-ish stroke weight) to an
@@ -45,6 +47,10 @@ const DEFAULT_SPIN: f32 = 0.1;
 const DEFAULT_SCALE: f32 = 0.9;
 const DEFAULT_BRIGHTNESS: f32 = 1.0;
 const DEFAULT_DRAW_PROGRESS: f32 = 1.0;
+// Shared view transform (ADR-0018): identity by default, so an unbound preset is
+// unchanged.
+const DEFAULT_ZOOM: f32 = 1.0;
+const DEFAULT_PAN: f32 = 0.0;
 
 /// A parametric line curve (the Maurer rose), sampled per frame and driven by
 /// named preset parameters over the audio analysis.
@@ -69,6 +75,9 @@ pub struct ParametricCurveScene {
     scale: f32,
     brightness: f32,
     draw_progress: f32,
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
 }
 
 impl ParametricCurveScene {
@@ -89,6 +98,9 @@ impl ParametricCurveScene {
             scale: DEFAULT_SCALE,
             brightness: DEFAULT_BRIGHTNESS,
             draw_progress: DEFAULT_DRAW_PROGRESS,
+            zoom: DEFAULT_ZOOM,
+            pan_x: DEFAULT_PAN,
+            pan_y: DEFAULT_PAN,
         }
     }
 }
@@ -112,6 +124,9 @@ impl Scene for ParametricCurveScene {
         self.scale = DEFAULT_SCALE;
         self.brightness = DEFAULT_BRIGHTNESS;
         self.draw_progress = DEFAULT_DRAW_PROGRESS;
+        self.zoom = DEFAULT_ZOOM;
+        self.pan_x = DEFAULT_PAN;
+        self.pan_y = DEFAULT_PAN;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
@@ -125,6 +140,9 @@ impl Scene for ParametricCurveScene {
             "scale" => self.scale = value,
             "brightness" => self.brightness = value,
             "draw_progress" => self.draw_progress = value,
+            "zoom" => self.zoom = value,
+            "pan_x" => self.pan_x = value,
+            "pan_y" => self.pan_y = value,
             _ => {}
         }
     }
@@ -185,8 +203,20 @@ impl Scene for ParametricCurveScene {
         aspect: f32,
     ) {
         // Segments carry brightness in their colour; glow multiplier stays 1.0.
-        self.renderer
-            .borrow_mut()
-            .draw(queue, encoder, view, aspect, 1.0, CLEAR, &self.segments);
+        let xform = ViewTransform {
+            zoom: self.zoom,
+            pan: [self.pan_x, self.pan_y],
+            _pad: 0.0,
+        };
+        self.renderer.borrow_mut().draw(
+            queue,
+            encoder,
+            view,
+            aspect,
+            1.0,
+            CLEAR,
+            xform,
+            &self.segments,
+        );
     }
 }

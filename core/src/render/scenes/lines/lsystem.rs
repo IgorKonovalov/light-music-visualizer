@@ -25,7 +25,7 @@ use std::rc::Rc;
 use super::super::Scene;
 use super::renderer::{LineRenderer, SegmentInstance};
 use super::{
-    CapOverflow, GeneratorConfig, MAX_LSYSTEM_DEPTH, MAX_SEGMENTS, grammar, palette,
+    CapOverflow, GeneratorConfig, MAX_LSYSTEM_DEPTH, MAX_SEGMENTS, ViewTransform, grammar, palette,
     transform_cached, turtle,
 };
 use crate::dsp::AnalysisFrame;
@@ -48,6 +48,9 @@ const DEFAULT_DRAW_PROGRESS: f32 = 1.0;
 const DEFAULT_THICKNESS: f32 = 1.8;
 const DEFAULT_SCALE: f32 = 1.0;
 const DEFAULT_BRIGHTNESS: f32 = 1.0;
+// Shared view transform (ADR-0018): identity by default.
+const DEFAULT_ZOOM: f32 = 1.0;
+const DEFAULT_PAN: f32 = 0.0;
 
 /// A generator scene driven by an L-system grammar.
 pub struct LSystemScene {
@@ -72,6 +75,9 @@ pub struct LSystemScene {
     thickness: f32,
     scale: f32,
     brightness: f32,
+    zoom: f32,
+    pan_x: f32,
+    pan_y: f32,
 }
 
 impl LSystemScene {
@@ -91,6 +97,9 @@ impl LSystemScene {
             thickness: DEFAULT_THICKNESS,
             scale: DEFAULT_SCALE,
             brightness: DEFAULT_BRIGHTNESS,
+            zoom: DEFAULT_ZOOM,
+            pan_x: DEFAULT_PAN,
+            pan_y: DEFAULT_PAN,
         }
     }
 
@@ -132,6 +141,9 @@ impl Scene for LSystemScene {
         self.thickness = DEFAULT_THICKNESS;
         self.scale = DEFAULT_SCALE;
         self.brightness = DEFAULT_BRIGHTNESS;
+        self.zoom = DEFAULT_ZOOM;
+        self.pan_x = DEFAULT_PAN;
+        self.pan_y = DEFAULT_PAN;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
@@ -143,6 +155,9 @@ impl Scene for LSystemScene {
             "thickness" => self.thickness = value,
             "scale" => self.scale = value,
             "brightness" => self.brightness = value,
+            "zoom" => self.zoom = value,
+            "pan_x" => self.pan_x = value,
+            "pan_y" => self.pan_y = value,
             _ => {}
         }
     }
@@ -209,9 +224,21 @@ impl Scene for LSystemScene {
         view: &wgpu::TextureView,
         aspect: f32,
     ) {
-        self.renderer
-            .borrow_mut()
-            .draw(queue, encoder, view, aspect, 1.0, CLEAR, &self.draw_buf);
+        let xform = ViewTransform {
+            zoom: self.zoom,
+            pan: [self.pan_x, self.pan_y],
+            _pad: 0.0,
+        };
+        self.renderer.borrow_mut().draw(
+            queue,
+            encoder,
+            view,
+            aspect,
+            1.0,
+            CLEAR,
+            xform,
+            &self.draw_buf,
+        );
     }
 }
 

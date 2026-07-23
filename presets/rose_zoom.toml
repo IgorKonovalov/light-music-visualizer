@@ -1,0 +1,23 @@
+# Rose Zoom - a 5-petal Maurer rose that pumps the shared view zoom with the bass
+# and drifts on a slow pan, the Phase 1 walking-skeleton demo of the ViewTransform
+# (ADR-0018). Zoom multiplies endpoint positions about the frame centre, so the
+# whole flower breathes toward and away from the camera on every kick.
+system = "parametric_curve"
+name   = "Rose Zoom"
+
+[curve]
+family = "maurer_rose"
+
+[params]
+n             = "5"
+d             = "97"
+samples       = "361"
+scale         = "0.8"
+spin          = "0.15 + mid * 0.3"
+hue           = "0.72 + time * 0.02 + treb * 0.25"
+thickness     = "1.6 + bass * 2.0"
+brightness    = "0.9 + clamp(bass * 0.6, 0, 0.6)"
+draw_progress = "1"
+zoom          = "1 + bass * 0.6"
+pan_x         = "sin(time * 0.3) * 0.05"
+pan_y         = "sin(time * 0.23 + 1.57) * 0.05"

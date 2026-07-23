@@ -46,6 +46,37 @@ pub const MAX_SEGMENTS: usize = 20_000;
 /// under this; the turtle's own segment cap is the second backstop.
 pub const MAX_LSYSTEM_DEPTH: u32 = 7;
 
+/// The shared camera transform every scene family applies (ADR-0018): a uniform
+/// **zoom** about the frame centre, then a **pan**, in world space before the
+/// aspect divide. Identity (`zoom = 1`, `pan = 0`) leaves geometry exactly where
+/// a scene placed it, so a preset that binds none of `zoom`/`pan_x`/`pan_y` is
+/// unchanged. `#[repr(C)]` + `Pod` so it uploads straight into a line-renderer
+/// uniform slot. Rotate is reserved for a follow-up (ADR-0018 reserves it).
+///
+/// Defined here for Phase 1 (the line scenes are the walking skeleton); Phase 2
+/// threads the same transform through the fragment and swarm scenes.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ViewTransform {
+    /// Uniform scale about the frame centre (`1.0` = no zoom).
+    pub zoom: f32,
+    /// Pan offset in world units `(x, y)`, applied after the zoom.
+    pub pan: [f32; 2],
+    /// Padding to fill a 16-byte uniform slot (unused).
+    pub _pad: f32,
+}
+
+impl Default for ViewTransform {
+    /// The identity view: no zoom, no pan.
+    fn default() -> Self {
+        Self {
+            zoom: 1.0,
+            pan: [0.0, 0.0],
+            _pad: 0.0,
+        }
+    }
+}
+
 /// Which parametric curve family a `[curve]` preset draws. Extend as Plan 0010's
 /// follow-ups add curve families (epicycloids, Lissajous, ...); unknown names
 /// are rejected at load.
