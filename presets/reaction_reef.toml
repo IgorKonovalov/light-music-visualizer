@@ -1,0 +1,24 @@
+# Reef - a Gray-Scott reaction-diffusion field in the LABYRINTH regime: dense,
+# interlocking channels like the folded ridges of brain coral. Warm-cored palette
+# (orange ridges, cool crevices) so it reads as a living reef, distinct from Coral's
+# cool teal maze; finer iso-contours put a bright spine down each channel.
+#
+#   - bass thickens the ridges via feed, mid trims them via kill, both staying inside
+#     the maze band so the walls never dissolve;
+#   - treble gently coarsens via flow; each beat stamps fresh growth.
+# Fine iso-contours (9) and a tight hatch (3.5) give the ridges their inner spine;
+# glow swells with low/mid energy. Warm hue drifts slowly with time and treble.
+#
+# Variables available to expressions: bass mid treb onset beat bar time.
+system = "reaction_diffusion"
+name = "Reef"
+
+[params]
+feed = "0.024 + clamp(bass * 4, 0, 1) * 0.006"
+kill = "0.055 + clamp(mid * 4, 0, 1) * 0.003"
+flow = "1.0 + clamp(treb * 4, 0, 1) * 0.25"
+inject = "beat"
+hue = "0.58 + time * 0.010 + clamp(treb * 3, 0, 1) * 0.06"
+contour = "9"
+hatch = "3.5"
+glow = "0.8 + clamp((bass + mid) * 3, 0, 1) * 0.5"

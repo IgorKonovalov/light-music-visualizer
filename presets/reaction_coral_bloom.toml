@@ -1,0 +1,24 @@
+# Coral Bloom - a Gray-Scott reaction-diffusion field in the CORAL-GROWTH regime:
+# fingered fronds that reach and split at their tips, spawning fresh buds on the beat.
+# Warm-cored palette (orange fronds, cool ground) so it reads as living coral, a
+# growing sibling to Coral's churning teal spots.
+#
+#   - bass drives the feed, growing the fronds faster and thicker; mid trims the kill,
+#     both staying inside the branching band so growth persists rather than dying back;
+#   - treble gently coarsens via flow; each beat stamps a fresh bud.
+# Mid iso-contours (5) and a loose hatch (6) keep the fronds legible; glow swells with
+# low/mid energy. Warm hue drifts slowly with time and treble.
+#
+# Variables available to expressions: bass mid treb onset beat bar time.
+system = "reaction_diffusion"
+name = "Coral Bloom"
+
+[params]
+feed = "0.036 + clamp(bass * 4, 0, 1) * 0.005"
+kill = "0.057 + clamp(mid * 4, 0, 1) * 0.003"
+flow = "1.0 + clamp(treb * 4, 0, 1) * 0.25"
+inject = "beat"
+hue = "0.58 + time * 0.012 + clamp(treb * 3, 0, 1) * 0.06"
+contour = "5"
+hatch = "6"
+glow = "0.9 + clamp((bass + mid) * 3, 0, 1) * 0.6"

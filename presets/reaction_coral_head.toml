@@ -1,0 +1,24 @@
+# Coral Head - a Gray-Scott reaction-diffusion field in a high-fill regime: fat,
+# rounded lobes with interior holes, like the massive folded surface of a brain-coral
+# head. Warm-cored palette (orange lobes, green-cyan crevices) to read as living reef,
+# versus Coral's cool teal thin maze.
+#
+#   - bass swells the fill via feed, mid trims it via kill, both staying inside the
+#     filled band so the lobes stay massive rather than dissolving to spots;
+#   - treble gently coarsens via flow; each beat stamps fresh growth.
+# Broad iso-contours (4) and a loose hatch keep the lobes soft and filled; glow
+# swells with low/mid energy. Warm hue drifts slowly with time and treble.
+#
+# Variables available to expressions: bass mid treb onset beat bar time.
+system = "reaction_diffusion"
+name = "Coral Head"
+
+[params]
+feed = "0.022 + clamp(bass * 4, 0, 1) * 0.006"
+kill = "0.051 + clamp(mid * 4, 0, 1) * 0.002"
+flow = "1.0 + clamp(treb * 4, 0, 1) * 0.25"
+inject = "beat"
+hue = "0.58 + time * 0.010 + clamp(treb * 3, 0, 1) * 0.06"
+contour = "4"
+hatch = "6"
+glow = "0.9 + clamp((bass + mid) * 3, 0, 1) * 0.5"
