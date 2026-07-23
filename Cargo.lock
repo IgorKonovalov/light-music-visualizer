@@ -836,7 +836,7 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
 name = "lmv-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytemuck",
  "glyphon",
@@ -851,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "lmv-ring"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "lock_api"
@@ -1982,7 +1982,7 @@ checksum = "4aaa7368fcf4852a4c2dd92df0cace6a71f2091ca0a23391ce7f3a31833f1523"
 
 [[package]]
 name = "standalone"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "block2 0.6.2",
  "dispatch2",
