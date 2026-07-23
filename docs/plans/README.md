@@ -15,33 +15,29 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | [0019](0019-preset-grammar-v2.md) | Preset expression grammar v2: branching, math functions, tempo, typo warnings | approved | Grow the preset expression language so authors stop hitting walls: add math functions (`cos sqrt pow smoothstep mod`) + constants (`pi tau`), branching (six comparison operators yielding `0/1` + a `select(cond,x,y)` conditional), and two new variables — `tempo` and experimental `novelty` (plumb the already-computed `AnalysisFrame.bpm`/`novelty`, no new DSP). Fix the silent-typo footgun — an unknown parameter name becomes a surfaced load **warning** (preset still loads its good bindings), backed by each system declaring its param vocabulary. Rewrite the stale `docs/presets.md` (claims 10 presets / 2 systems; code ships 17 / 5) last. Core-only, allocation-free/panic-free per frame, **C ABI untouched**; no new DSP, no boolean ops, no ternary, no Rhai. Pre-1.0 so no backward-compat obligation (additions are incidentally non-breaking). [ADR-0020](../adrs/0020-preset-grammar-v2-branching-functions-tempo.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); from `preset-author`-lane grammar feedback. |
 | [0020](0020-shared-palette-system.md) | Shared palette system: gradient LUT, named + custom palettes, bindable color | approved | Give presets real color control. Both preset-driven scenes hardcode the **same** iq cosine palette, so a preset's only color lever is a scalar `hue` offset — fragment fields can't hold a cohesive mood and swarm color is unreachable (per-particle hue is random across the full wheel, making `hue` a visual no-op). Add one shared `core/src/render/palette.rs` that bakes a gradient (built-in **named** palette or **custom stops**) into a 256-entry LUT every scene colors through — delivered to the fragment scene as a 256x1 1D texture, sampled on CPU by the swarm — plus **fully bindable** color via layer-2 named params (`saturation`, `hue`, fragment `color_span`/`color_center`, swarm `hue_spread`/`hue_center`) and an A/B `palette_mix` crossfade for bindable palette *selection*. Default `spectrum` palette = the exact current cosine, so the 17 shipped presets are **visually unchanged** until re-authored. Adds one thin off-hot-path `Scene::set_palette` hook (second widening after ADR-0007's `configure`). Core-only, **C ABI frozen**, no new dependency; from `preset-author`-lane color feedback (commit 76a2fb4). [ADR-0021](../adrs/0021-shared-palette-system.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); rejected in-shader stop-array, cosine-coefficient params, minimal per-scene fix, bindable integer palette index, OKLab color management. **Independent of the `dt` coupling** (touches preset schema + scene shaders, not the render clock) — can land anytime. |
 | [0021](0021-decouple-preset-content-from-code.md) | Decouple preset content from code: build-time embedding + single-source system names | approved | Shipping a preset is currently a code change: `core/src/preset/mod.rs` hand-lists every embedded preset as an `include_str!` tuple, so adding a `.toml` means editing the array, bumping its length, and bumping a count assert in `core/tests/preset.rs` (the reaction-diffusion work just paid this, 17->18). Add a zero-dependency `core/build.rs` that globs `presets/*.toml` at build time and generates the `EMBEDDED` list (`rerun-if-changed`), so **dropping a `.toml` in `presets/` ships it with no Rust edit**; the count test becomes structural (all-parse + floor). Phase 2 folds in a related DRY cleanup: the `SystemKind` name<->kind mapping, duplicated in `schema.rs::from_name` + `shot.rs::parse_system` + `shot.rs::system_name`, collapses to one public source in core that `shot` reuses. Also simplifies the `preset-author`->`dev` curation handoff (embedding becomes "commit the file"). Core + one CLI helper; **C ABI frozen, no new dependency**; the project's first build script. [ADR-0022](../adrs/0022-build-time-preset-embedding.md); rejected the `include_dir` crate, a slice-only tweak, load-only, and an in-repo proc-macro. Independent of the `dt` coupling; can land anytime. |
-| [0014](0014-reaction-diffusion-feedback-scene.md) | Reaction-diffusion feedback scene + frame-rate-independent render clock | approved | The engine's first **stateful feedback** scene: a Gray-Scott reaction-diffusion simulation (evolving nested contours / cellular tissue / hatched restructuring maze) on a new reusable `render::feedback::PingPongField` (two offscreen `Rgba16Float` textures swapped each sub-step, fixed internal grid, present pass composites to the surface). Driven by a **fixed-timestep accumulator fed by real injected `dt`** so it looks identical on any device over wall-clock time — the core stays clock-free (Plan 0013 capture feeds a fixed `dt` for reproducibility). Delivering `dt` at the render seam (`Renderer::render(&frame, dt)`) lets us **converge the shared scene clock globally and retire `SCENE_DT`**, making every existing scene frame-rate-independent (resolves the standing SCENE_DT wish). Audio drives it via existing named params (ADR-0002 layer 2): bands modulate feed/kill/flow, beats stamp seeds. Adds C ABI **v4 `lmv_render_dt`** ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md), additive; `lmv_render` becomes the 1/60 wrapper) so the foobar plugin gets parity. New feedback render system per [ADR-0012](../adrs/0012-stateful-feedback-render-system.md); rejected warp-feedback advection, engine-managed multi-pass, per-frame stepping. Core + both frontends. Cross-plan dep: 0013's capture must thread a fixed `dt`. |
-| [0022](0022-golden-fixtures-decouple-content.md) | Decouple the golden drift guard from shipped presets (per-system frozen fixtures) | approved | `core/tests/golden.rs` pins its drift baselines to three **shipped, curated presets** (`Aurora`/`Warp Drive`/`Drift`) — exactly what the `preset-author` lane tunes — so every intentional content change trips the engine-drift alarm and reds CI (it did: commit `76a2fb4` moved all three past tolerance). Repoint golden at **test-only frozen fixtures, one per `SystemKind`**, authored as TOML under `core/tests/fixtures/` and keyed by an **exhaustive match** so a new scene must add a fixture (closes today's zero coverage of the three line-family systems). Shipped presets **drop all golden pixel-pinning** and keep only their behavioral floors (`sanity`/`reactivity`/`animation`); the three shipped baselines are deleted. Landing this also **greens `main`** from the `76a2fb4` drift. [ADR-0023](../adrs/0023-golden-drift-guard-uses-frozen-fixtures.md); rejected keeping golden on shipped presets, a loose pin on shipped too, per-idiom fixtures, and embedded consts / reusing `default_presets()`. Test-only, **C ABI frozen**, no `ci.yml` change; independent of the `dt` coupling, can land anytime. Cross-plan coordination: the in-flight `ReactionDiffusion` variant (Plan 0014) adds its fixture when it lands (forced by the exhaustive match). |
+| [0022](0022-golden-fixtures-decouple-content.md) | Decouple the golden drift guard from shipped presets (per-system frozen fixtures) | approved | `core/tests/golden.rs` pins its drift baselines to three **shipped, curated presets** (`Aurora`/`Warp Drive`/`Drift`) — exactly what the `preset-author` lane tunes — so every intentional content change trips the engine-drift alarm and reds CI (it did: commit `76a2fb4` moved all three past tolerance). Repoint golden at **test-only frozen fixtures, one per `SystemKind`**, authored as TOML under `core/tests/fixtures/` and keyed by an **exhaustive match** so a new scene must add a fixture (closes today's zero coverage of the three line-family systems). Shipped presets **drop all golden pixel-pinning** and keep only their behavioral floors (`sanity`/`reactivity`/`animation`); the three shipped baselines are deleted. Landing this also **greens `main`** from the `76a2fb4` drift. [ADR-0023](../adrs/0023-golden-drift-guard-uses-frozen-fixtures.md); rejected keeping golden on shipped presets, a loose pin on shipped too, per-idiom fixtures, and embedded consts / reusing `default_presets()`. Test-only, **C ABI frozen**, no `ci.yml` change; independent of the `dt` coupling, can land anytime. Cross-plan coordination: Plan 0014 has now **landed**, so `SystemKind::ReactionDiffusion` exists and the exhaustive match forces 0022 to add its fixture. **0022 also greens `main`** (still red from `76a2fb4`) — it is the immediate next plan. |
 
 ## Recommended execution sequence
 
-A tactical ordering of the **active roster** (strategic themes live in the Roadmap below). One
-coupling drives it: **0014 depends on 0013's capture threading a fixed `dt`** while it retires
-`SCENE_DT`. (**Plan 0013 has now landed and closed** — the capture/visual-QA harness is available;
-`Renderer::capture_preset`/`capture_audio` + the `shot` CLI + the `core/tests/` reactivity/
-animation/sanity/beat/golden suite exist for the scene plans below to build against.)
+A tactical ordering of the **active roster** (strategic themes live in the Roadmap below).
+(**Plan 0014 has now landed and closed** — the `render::feedback::PingPongField` seam, the injected-`dt`
+render clock (`Renderer::render(&frame, dt)`, `Scene::advance`, `SCENE_DT` retired to `FALLBACK_DT`),
+C ABI **v4 `lmv_render_dt`**, and the `ReactionDiffusion` scene all exist for the plans below to build
+against; see Recently closed. Plan 0013's capture/visual-QA harness landed before it.)
 
-1. **[0014] Reaction-diffusion feedback + retire `SCENE_DT`** — the harness is now in place to test
-   the feedback scene. **0014 should own the `SCENE_DT` → injected-`dt` migration**, updating
-   0013's now-landed `capture_preset`/`capture_audio` to pass a fixed `dt`, so the change lives in
-   one plan. Adds C ABI v4 ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md)). *Approved — its scope
-   should update 0013's capture primitives to the injected `dt` before dev starts either plan.*
-2. **[0016] GPU compute-particle scenes (attractors)** — sequenced **after 0014**: it reuses 0014's
-   `PingPongField` (trails) and injected-`dt` clock, so 0014 must land first. Introduces the first
-   compute pipeline in core ([ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md)). **Approved** —
-   ready for `dev` once 0014 has landed.
-3. **[0018] Engine-wide visual enrichment (zoom/atmosphere/easing/mirrors)** — also sequenced
-   **after 0014**: Phases 5-7 (easing, trails, screen-space kaleidoscope) reuse 0014's injected
-   `dt` + offscreen/present + `PingPongField`, though Phases 1-4 (view transform, background,
-   geometry mirror) are 0014-independent. Engine-wide composite + easing seam
+1. **[0022] Decouple golden from shipped presets** — **immediate next**: it greens `main` (red since
+   `76a2fb4`) and its exhaustive `SystemKind` match now *must* add a `ReactionDiffusion` fixture
+   (0014 landed). Test-only, C ABI frozen ([ADR-0023](../adrs/0023-golden-drift-guard-uses-frozen-fixtures.md)).
+2. **[0016] GPU compute-particle scenes (attractors)** — reuses 0014's now-landed `PingPongField`
+   (trails) and injected-`dt` clock. Introduces the first compute pipeline in core
+   ([ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md)). **Approved** — ready for `dev`.
+3. **[0018] Engine-wide visual enrichment (zoom/atmosphere/easing/mirrors)** — Phases 5-7 (easing,
+   trails, screen-space kaleidoscope) reuse 0014's now-landed injected `dt` + offscreen/present +
+   `PingPongField`; Phases 1-4 (view transform, background, geometry mirror) are independent.
+   Engine-wide composite + easing seam
    ([ADR-0018](../adrs/0018-engine-wide-scene-compositing.md), [ADR-0019](../adrs/0019-eased-parameters.md));
-   C ABI untouched. **Approved** — ready for `dev` once 0014 has landed. A natural companion to
-   0016 (both build the post-0014 composite/effects layer).
+   C ABI untouched. **Approved** — ready for `dev`. A natural companion to 0016 (both build the
+   post-0014 composite/effects layer).
 
 (**[0010] Line-geometry scenes has now landed and closed** — the line-art category (roses,
 L-systems, Hankin stars) built on the shared `LineRenderer` is available; see Recently closed.)
@@ -77,6 +73,34 @@ lane whose color feedback (commit 76a2fb4) motivated it. Core-only, C ABI frozen
   iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0014 — Reaction-diffusion feedback scene + frame-rate-independent render clock](done/0014-reaction-diffusion-feedback-scene.md) —
+  **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; two minor, two nits). Six `dev`
+  phase commits (`345be23`, `13148b7`, `39b6091`, `cb71057`, `9fcfc95`, `8a05cea`). Landed the
+  engine's **first stateful feedback scene** — Gray-Scott reaction-diffusion on a reusable
+  `render::feedback::PingPongField` (two `Rgba16Float` offscreen textures, fixed 256² grid) with an
+  iso-contour + hatch + cosine-palette present look, driven by named params (`feed`/`kill`/`flow`/
+  `inject` + look scalars, ADR-0002 layer 2) so bands steer the regime and beats stamp seeded growth;
+  one embedded preset (`Coral`, roster **slot 5**). Threaded real **injected `dt`** through
+  `Renderer::render(&frame, dt)` + a no-op-default `Scene::advance(dt)`, **retired `SCENE_DT`**
+  (demoted to `FALLBACK_DT` for the ABI wrapper + capture), and made the CPU swarm
+  frame-rate-independent (dt-scaled advection + `powf` damping, once/frame). Added **C ABI v4
+  `lmv_render_dt`** ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md), now **accepted**; `lmv_render` =
+  the exact `1/60` wrapper), header in lockstep, foobar shim QPC `measure_dt()`; new feedback render
+  system per [ADR-0012](../adrs/0012-stateful-feedback-render-system.md) (now **accepted**). Both new
+  scenes build GPU resources **lazily on first render** and beat injection folds into the sim shader
+  (not a 4th pipeline) — documented DX12-WARP capture workarounds, real hardware unaffected. Verified:
+  `fmt` / `clippy -D warnings` clean; `reaction_diffusion_contract` (sanity/animation/reactivity/
+  **seed-reproducibility**), `ffi` v4, `preset` count 18, `hygiene` (both new `render/` files carry the
+  panic pragma) all green. **Minor:** (1) the present pass ignores aspect (stretches the square grid) —
+  an implicit choice the plan asked to document; (2) the lazy build makes the first cycle to `Coral`
+  hitch once, against `cycle_preset`'s "never hitches" doc. **Nits:** stale `SCENE_DT` comment in
+  `animation.rs:15`; the swarm "byte-identical at 60fps" claim is ULP-optimistic (moot — reproducibility
+  holds, 0022 retires the swarm golden pin). **⚠ On-device carry-forwards** (like prior plans): Phase 2
+  same-speed eyeball, Phase 4 "reads as the reference family" (dev verified via real-GPU PNGs), Phase 5
+  live-foobar plugin `dt` (C++ shim not compiled here). **⚠ `main` stays red on `golden`** (pre-existing
+  from `76a2fb4`, blessed cross-GPU; 0014's swarm `dt`-change also perturbs `Drift`) — **Plan 0022
+  greens it**, not this close. Version **minor 0.4.0 → 0.5.0** at close.
 
 - [0009 — Live performance features (standalone)](done/0009-live-performance-features.md) —
   **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; two minor deviations, both

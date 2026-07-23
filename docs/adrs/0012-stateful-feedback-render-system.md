@@ -1,6 +1,6 @@
 # ADR-0012 — Stateful feedback render system: ping-pong offscreen simulation with a fixed-timestep accumulator (Gray-Scott first)
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-22
 > **Related plan(s):** 0014-reaction-diffusion-feedback-scene
 

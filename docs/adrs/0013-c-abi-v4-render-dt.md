@@ -1,6 +1,6 @@
 # ADR-0013 — C ABI v4: add lmv_render_dt (injected real dt); bump to v4
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-22
 > **Related plan(s):** 0014-reaction-diffusion-feedback-scene
 > **Related ADRs:** 0003 (C ABI v1), 0006 (v2), 0008 (v3), 0012 (feedback system)

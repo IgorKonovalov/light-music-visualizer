@@ -1,9 +1,40 @@
 # 0014 — Reaction-diffusion feedback scene + frame-rate-independent render clock
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-22
+> **Closed:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0012](../adrs/0012-stateful-feedback-render-system.md) (stateful feedback render system), [0013](../adrs/0013-c-abi-v4-render-dt.md) (C ABI v4: lmv_render_dt), [0002](../adrs/0002-layered-preset-architecture.md) (preset layers)
+>
+> **Close (2026-07-23, Mode 4 review — no blockers, no majors; 2 minor, 2 nits):**
+> Six `dev` phase commits (`345be23`, `13148b7`, `39b6091`, `cb71057`, `9fcfc95`,
+> `8a05cea`). Landed the engine's first **stateful feedback** scene — Gray-Scott
+> reaction-diffusion on a reusable `render::feedback::PingPongField` (two
+> `Rgba16Float` offscreen textures, fixed 256² grid) with an iso-contour + hatch +
+> cosine-palette present look, driven by named params (`feed`/`kill`/`flow`/`inject`
+> + look scalars, ADR-0002 layer 2) so bands steer the regime and beats stamp seeded
+> growth — plus one embedded preset (`Coral`, roster **slot 5**). Threaded real
+> **injected `dt`** through `Renderer::render(&frame, dt)` and a no-op-default
+> `Scene::advance(dt)`, **retired `SCENE_DT`** (demoted to `FALLBACK_DT` for the ABI
+> wrapper + capture), and made the CPU swarm frame-rate-independent (dt-scaled
+> advection + `powf` damping, once/frame). Added **C ABI v4 `lmv_render_dt`**
+> (ADR-0013 accepted; `lmv_render` = the exact `1/60` wrapper), header in lockstep,
+> foobar shim QPC `measure_dt()`. ADR-0012 accepted. Verified: `fmt`/`clippy
+> -D warnings` clean; `reaction_diffusion_contract` (sanity/animation/reactivity/
+> **seed-reproducibility**), `ffi` v4, `preset` count 18, `hygiene` (both new
+> `render/` files carry the pragma) all green. Both new scenes build GPU resources
+> **lazily on first render** (a documented DX12-WARP capture workaround) and beat
+> injection is folded into the sim shader (not a 4th pipeline) for the same reason.
+> **Minor:** (1) the present pass ignores aspect (stretches the square grid) —
+> an implicit choice the plan asked to document; (2) the lazy build makes the first
+> cycle to `Coral` hitch once, against `cycle_preset`'s "never hitches" doc. **Nits:**
+> a stale `SCENE_DT` comment in `animation.rs:15`; the swarm "byte-identical" claim
+> is ULP-optimistic (moot — reproducibility holds, Plan 0022 retires the swarm golden
+> pin). **On-device carry-forwards** (like prior plans): Phase 2 same-speed eyeball,
+> Phase 4 "reads as the reference family" (dev verified via real-GPU PNGs), Phase 5
+> live-foobar plugin `dt` (C++ shim not compiled here). **Note:** `main` stays red on
+> `golden` (pre-existing from `76a2fb4`, blessed cross-GPU) — **Plan 0022 greens it**,
+> not this close. Version **minor 0.4.0 → 0.5.0** at close.
 
 ## TL;DR
 
