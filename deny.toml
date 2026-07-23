@@ -11,8 +11,13 @@
 [graph]
 # Evaluate only the platforms we actually ship (ADR-0001: Windows + macOS).
 # This prunes crates pulled in solely by other targets - e.g. winit's Linux
-# Wayland backend (sctk-adwaita -> ab_glyph -> ttf-parser) - so the gate
-# reflects our shipped artifacts rather than deps we never build.
+# Wayland backend - so the gate reflects our shipped artifacts rather than deps
+# we never build.
+#
+# NOTE: this does NOT prune ttf-parser. That crate enters via the glyphon text
+# stack (ttf-parser -> fontdb -> cosmic-text -> glyphon -> lmv-core, ADR-0009's
+# `text` feature) and is present on BOTH shipped targets, so the target list
+# has no effect on it - see the RUSTSEC-2026-0192 ignore below.
 targets = [
     { triple = "x86_64-pc-windows-msvc" },
     { triple = "aarch64-apple-darwin" },
@@ -20,9 +25,22 @@ targets = [
 ]
 
 [advisories]
-# Default database is rustsec/advisory-db. Nothing ignored: a new ignore entry
-# is a deliberate, reasoned exception (id + reason), never a silent pass.
-ignore = []
+# Default database is rustsec/advisory-db. A new ignore entry is a deliberate,
+# reasoned exception (id + reason), never a silent pass.
+ignore = [
+    # RUSTSEC-2026-0192: ttf-parser is unmaintained. This is an UNMAINTAINED
+    # notice, NOT a vulnerability or unsound finding (those stay hard errors).
+    # ttf-parser is load-bearing via the glyphon text stack
+    # (ttf-parser -> fontdb -> cosmic-text -> glyphon -> lmv-core), enabled by
+    # ADR-0009's `text` feature on both shipped targets. cosmic-text 0.19 pins
+    # ttf-parser 0.25 (both latest), so there is no update or clean drop without
+    # reversing ADR-0009 or patching upstream. cargo-deny silences only this
+    # exact id; a real future advisory on ttf-parser would still fail.
+    # REVISIT (Plan 0017 followup): on each glyphon/cosmic-text/wgpu bump,
+    # re-check whether the text stack still pins the unmaintained ttf-parser;
+    # remove this ignore once it no longer does.
+    "RUSTSEC-2026-0192",
+]
 
 [licenses]
 # Explicit allowlist of permissive licenses. Extended by dev as real deps
