@@ -67,9 +67,22 @@ const SEED: u64 = 0x4C4D_565F_5244_5F31; // "LMV_RD_1"
 const DEFAULT_FEED: f32 = 0.0367;
 const DEFAULT_KILL: f32 = 0.0649;
 /// Diffusion rates for the two species (classic Karl Sims values at internal
-/// `dt = 1`, paired with the 3×3 Laplacian kernel in the shader).
+/// `dt = 1`, paired with the 3×3 Laplacian kernel in the shader). The `flow`
+/// param (Phase 3) scales both, keeping their ratio, so a band can coarsen or
+/// tighten the pattern's spatial scale.
 const DIFFUSE_U: f32 = 0.16;
 const DIFFUSE_V: f32 = 0.08;
+/// `flow` default: unscaled diffusion.
+const DEFAULT_FLOW: f32 = 1.0;
+
+/// Beat-stamped seed injection (Phase 3). A rising `inject` edge stamps a blob
+/// of V into the field at the next seeded position, so a beat spawns new growth.
+/// Positions come from a `SeededRng` (NFR 6) so a capture reproduces exactly.
+const INJECT_RADIUS: f32 = 0.045;
+const INJECT_AMOUNT: f32 = 0.85;
+const INJECT_SEED: u64 = 0x4C4D_5244_494E_4A31; // "LMRDINJ1"
+/// `inject` rises past this to fire one stamp (edge-triggered, not per-frame).
+const INJECT_THRESHOLD: f32 = 0.5;
 
 /// Seed pass: U = 1 everywhere, V = 1 inside the scattered blobs.
 const INIT_SHADER: &str = r#"
@@ -128,7 +141,8 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
 }
 
 struct Sim {
-    p: vec4<f32>, // x: feed, y: kill, z: diffuse_u, w: diffuse_v
+    p: vec4<f32>,   // x: feed, y: kill, z: diffuse_u, w: diffuse_v
+    inj: vec4<f32>, // xy: stamp center (uv), z: radius, w: amount (0 = no stamp)
 }
 @group(0) @binding(0) var<uniform> sim: Sim;
 @group(0) @binding(1) var field: texture_2d<f32>;
@@ -164,7 +178,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let dv = sim.p.w;
     let reaction = u * v * v;
     let nu = u + du * lap.x - reaction + feed * (1.0 - u);
-    let nv = v + dv * lap.y + reaction - (kill + feed) * v;
+    var nv = v + dv * lap.y + reaction - (kill + feed) * v;
+
+    // Beat-stamped seed injection (Phase 3), folded into the sim so no extra
+    // pipeline is needed. `inj.w` is non-zero only on the stamp frame; it is
+    // applied on every sub-step of that frame, so V saturates at the stamp.
+    let stamp = sim.inj.w * (1.0 - smoothstep(sim.inj.z * 0.4, sim.inj.z, distance(in.uv, sim.inj.xy)));
+    nv = nv + stamp;
+
     return vec4<f32>(clamp(nu, 0.0, 1.0), clamp(nv, 0.0, 1.0), 0.0, 1.0);
 }
 "#;
@@ -207,7 +228,10 @@ struct InitParams {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct SimParams {
+    /// x: feed, y: kill, z: diffuse_u, w: diffuse_v.
     p: [f32; 4],
+    /// xy: injection stamp center (uv), z: radius, w: amount (0 = none).
+    inj: [f32; 4],
 }
 
 /// The GPU-side state, built lazily on first render (see the module docs).
@@ -257,7 +281,6 @@ impl Resources {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-
         // --- init pipeline: one uniform, writes the seed field ---
         let init_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("rd-init-layout"),
@@ -342,7 +365,8 @@ impl Resources {
 }
 
 /// Gray-Scott reaction-diffusion on a ping-pong field, driven by named preset
-/// parameters (audio wiring lands in Phase 3).
+/// parameters (ADR-0002 layer 2): `feed`/`kill` pick the regime, `flow` scales
+/// the diffusion, and a rising `inject` edge stamps a seeded blob of growth.
 pub struct ReactionDiffusionScene {
     /// Cloned device handle (an `Arc` inside wgpu) used to build [`Resources`]
     /// lazily on first render — see the module docs for why.
@@ -358,12 +382,22 @@ pub struct ReactionDiffusionScene {
     accumulator: f32,
     /// Sub-steps `advance` scheduled for the next `render` to encode.
     pending_substeps: u32,
+    /// Seeded RNG for injection stamp positions (NFR 6); advanced only when a
+    /// stamp fires, and reset with the scene so a capture reproduces exactly.
+    stamp_rng: SeededRng,
+    /// A stamp scheduled by an `inject` rising edge for the next `render`:
+    /// (cx, cy, radius, amount). `None` when no beat fired this frame.
+    pending_stamp: Option<[f32; 4]>,
+    /// Previous frame's `inject` value, for rising-edge detection.
+    prev_inject: f32,
     /// Shared scene clock (seconds), set by the renderer each frame.
     time: f32,
     feed: f32,
     kill: f32,
-    diffuse_u: f32,
-    diffuse_v: f32,
+    /// Diffusion scale (multiplies both species' rates, keeping their ratio).
+    flow: f32,
+    /// This frame's injection level (bound to a beat/onset expression).
+    inject: f32,
 }
 
 impl ReactionDiffusionScene {
@@ -392,11 +426,14 @@ impl ReactionDiffusionScene {
             needs_seed: true,
             accumulator: 0.0,
             pending_substeps: 0,
+            stamp_rng: SeededRng::new(INJECT_SEED),
+            pending_stamp: None,
+            prev_inject: 0.0,
             time: 0.0,
             feed: DEFAULT_FEED,
             kill: DEFAULT_KILL,
-            diffuse_u: DIFFUSE_U,
-            diffuse_v: DIFFUSE_V,
+            flow: DEFAULT_FLOW,
+            inject: 0.0,
         }
     }
 }
@@ -590,24 +627,35 @@ impl Scene for ReactionDiffusionScene {
     fn reset_params(&mut self) {
         self.feed = DEFAULT_FEED;
         self.kill = DEFAULT_KILL;
-        self.diffuse_u = DIFFUSE_U;
-        self.diffuse_v = DIFFUSE_V;
+        self.flow = DEFAULT_FLOW;
+        self.inject = 0.0;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
-        // Phase 1 exposes the two Gray-Scott regime knobs so a preset can bind
-        // them to the audio; the fuller param set (flow, contour, hue, seed
-        // injection) lands in Phase 3.
+        // ADR-0002 layer 2 knobs. `feed`/`kill` pick the regime; `flow` scales
+        // the diffusion; `inject` is a beat/onset level whose rising edge stamps
+        // a seed (edge detected in `update`). The look params (hue, contour)
+        // land with the iso-contour present in Phase 4.
         match name {
             "feed" => self.feed = value,
             "kill" => self.kill = value,
+            "flow" => self.flow = value,
+            "inject" => self.inject = value,
             _ => {}
         }
     }
 
     fn update(&mut self, _frame: &AnalysisFrame) {
-        // Fully parameter-driven; audio reaches the sim through named params
-        // bound by the preset (Phase 3), never read here directly.
+        // Rising-edge detect on `inject` (a beat/onset expression): schedule one
+        // stamp at the next seeded position. Edge-triggered so a sustained beat
+        // flag doesn't stamp every frame; deterministic because the position
+        // comes from the seeded, capture-reset `stamp_rng` (NFR 6).
+        if self.inject >= INJECT_THRESHOLD && self.prev_inject < INJECT_THRESHOLD {
+            let cx = self.stamp_rng.next_f32();
+            let cy = self.stamp_rng.next_f32();
+            self.pending_stamp = Some([cx, cy, INJECT_RADIUS, INJECT_AMOUNT]);
+        }
+        self.prev_inject = self.inject;
     }
 
     fn render(
@@ -626,21 +674,28 @@ impl Scene for ReactionDiffusionScene {
             init_params,
             needs_seed,
             pending_substeps,
+            pending_stamp,
             feed,
             kill,
-            diffuse_u,
-            diffuse_v,
+            flow,
             ..
         } = self;
         let Some(res) = res.as_mut() else {
             return;
         };
 
+        // A beat scheduled a stamp this frame (consumed here): the sim shader
+        // applies it on every sub-step, so V saturates at the stamp. `[0; 4]`
+        // means no injection.
+        let inj = pending_stamp.take().unwrap_or([0.0; 4]);
         queue.write_buffer(
             &res.sim_uniform,
             0,
             bytemuck::bytes_of(&SimParams {
-                p: [*feed, *kill, *diffuse_u, *diffuse_v],
+                // `flow` scales both diffusion rates, keeping the 2:1 ratio (so
+                // the pattern coarsens/tightens without changing regime).
+                p: [*feed, *kill, DIFFUSE_U * *flow, DIFFUSE_V * *flow],
+                inj,
             }),
         );
 
