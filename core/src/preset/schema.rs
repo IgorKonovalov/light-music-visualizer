@@ -37,7 +37,12 @@ pub enum SystemKind {
 }
 
 impl SystemKind {
-    fn from_name(name: &str) -> Option<Self> {
+    /// Parse a canonical system name (as written in a preset's `system = "..."`
+    /// field) into its [`SystemKind`], or `None` if unknown. The inverse of
+    /// [`SystemKind::as_str`]; together they are the single source for the
+    /// name↔kind mapping, reused by the `shot` CLI so it declares no match of
+    /// its own.
+    pub fn from_name(name: &str) -> Option<Self> {
         Some(match name {
             "fragment_field" => SystemKind::FragmentField,
             "swarm" => SystemKind::Swarm,
@@ -48,6 +53,21 @@ impl SystemKind {
             "attractor" => SystemKind::Attractor,
             _ => return None,
         })
+    }
+
+    /// The canonical name of this system — the exact string accepted by
+    /// [`SystemKind::from_name`] and written in a preset's `system` field. The
+    /// two functions are inverses and the one place the mapping lives.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SystemKind::FragmentField => "fragment_field",
+            SystemKind::Swarm => "swarm",
+            SystemKind::ParametricCurve => "parametric_curve",
+            SystemKind::LSystem => "lsystem",
+            SystemKind::StarPattern => "star_pattern",
+            SystemKind::ReactionDiffusion => "reaction_diffusion",
+            SystemKind::Attractor => "attractor",
+        }
     }
 }
 

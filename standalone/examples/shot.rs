@@ -167,18 +167,13 @@ fn apply_set(frame: &mut AnalysisFrame, spec: &str) -> Result<(), String> {
 }
 
 fn parse_system(name: &str) -> Result<SystemKind, String> {
-    match name {
-        "fragment_field" => Ok(SystemKind::FragmentField),
-        "swarm" => Ok(SystemKind::Swarm),
-        "parametric_curve" => Ok(SystemKind::ParametricCurve),
-        "lsystem" => Ok(SystemKind::LSystem),
-        "star_pattern" => Ok(SystemKind::StarPattern),
-        "reaction_diffusion" => Ok(SystemKind::ReactionDiffusion),
-        "attractor" => Ok(SystemKind::Attractor),
-        other => Err(format!(
-            "unknown family `{other}` (fragment_field | swarm | parametric_curve | lsystem | star_pattern | reaction_diffusion | attractor)"
-        )),
-    }
+    // The name↔kind mapping is single-sourced on SystemKind in core; keep only
+    // shot's friendly error text here.
+    SystemKind::from_name(name).ok_or_else(|| {
+        format!(
+            "unknown family `{name}` (fragment_field | swarm | parametric_curve | lsystem | star_pattern | reaction_diffusion | attractor)"
+        )
+    })
 }
 
 fn print_usage() {
@@ -798,24 +793,12 @@ fn corner(img: &CaptureImage) -> [u8; 4] {
     ]
 }
 
-fn system_name(system: SystemKind) -> &'static str {
-    match system {
-        SystemKind::FragmentField => "fragment_field",
-        SystemKind::Swarm => "swarm",
-        SystemKind::ParametricCurve => "parametric_curve",
-        SystemKind::LSystem => "lsystem",
-        SystemKind::StarPattern => "star_pattern",
-        SystemKind::ReactionDiffusion => "reaction_diffusion",
-        SystemKind::Attractor => "attractor",
-    }
-}
-
 fn print_text_report(source: &str, reports: &[FamilyReport]) {
     println!("visual-QA report [{source}]");
     for fam in reports {
         println!(
             "\n=== {} ({} presets) ===",
-            system_name(fam.system),
+            fam.system.as_str(),
             fam.presets.len()
         );
         println!(
@@ -857,7 +840,7 @@ fn render_json(source: &str, reports: &[FamilyReport]) -> String {
         if fi > 0 {
             out.push(',');
         }
-        out.push_str(&format!("{}:{{", json_string(system_name(fam.system))));
+        out.push_str(&format!("{}:{{", json_string(fam.system.as_str())));
         // presets
         out.push_str("\"presets\":{");
         for (pi, p) in fam.presets.iter().enumerate() {
