@@ -1168,7 +1168,9 @@ impl Scene for AttractorScene {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    // Load over the engine backdrop (ADR-0018): the additive
+                    // point cloud blooms over whatever the background pass painted.
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],

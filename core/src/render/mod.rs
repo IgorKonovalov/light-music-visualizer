@@ -17,6 +17,7 @@
     clippy::unreachable
 )]
 
+mod background;
 pub mod capture;
 pub mod context;
 pub mod feedback;
@@ -31,6 +32,7 @@ use crate::audio::AudioFormat;
 use crate::diag::{Diag, Metrics};
 use crate::dsp::AnalysisFrame;
 use crate::preset::{Preset, SystemKind, Variables};
+use background::Background;
 pub use capture::CaptureImage;
 pub use context::{RenderContext, RenderError};
 use overlay::Overlay;
@@ -142,6 +144,10 @@ pub struct HeadlessOptions {
 pub struct Renderer {
     ctx: RenderContext,
     scenes: Vec<Box<dyn Scene>>,
+    /// The background pre-pass (ADR-0018): fills the frame with a gradient/vignette
+    /// backdrop before the scene draws. Driven by `bg_*` named params the renderer
+    /// routes to it; owns the frame clear now that scenes `Load` instead of `Clear`.
+    background: Background,
     /// Loaded presets + the active index (pure selection state — see [`Roster`]).
     roster: Roster,
     /// Shared scene clock (seconds), advanced one fixed step per rendered frame.
@@ -171,12 +177,14 @@ impl Renderer {
     ) -> Result<Self, RenderError> {
         let ctx = RenderContext::new(target, width, height)?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
+        let background = Background::new(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
         let mut renderer = Self {
             ctx,
             scenes,
+            background,
             roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
@@ -198,12 +206,14 @@ impl Renderer {
     pub fn new_headless(opts: HeadlessOptions) -> Result<Self, RenderError> {
         let ctx = RenderContext::new_headless(opts.width, opts.height, opts.prefer_software)?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
+        let background = Background::new(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
         let mut renderer = Self {
             ctx,
             scenes,
+            background,
             roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
@@ -240,12 +250,14 @@ impl Renderer {
         };
         let ctx = unsafe { RenderContext::new_unsafe(target, width, height) }?;
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
+        let background = Background::new(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
         let mut renderer = Self {
             ctx,
             scenes,
+            background,
             roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
@@ -462,6 +474,7 @@ impl Renderer {
         let Self {
             ctx,
             scenes,
+            background,
             roster,
             time,
             diag,
@@ -491,17 +504,26 @@ impl Renderer {
         );
         scene.set_time(*time);
         scene.advance(dt);
+        background.reset_params();
         scene.reset_params();
         for binding in &preset.params {
-            scene.set_param(&binding.name, binding.expr.eval(&vars));
+            let value = binding.expr.eval(&vars);
+            // Route `bg_*` params to the background pass; everything else to the
+            // scene. The namespaces are disjoint, so no param reaches both.
+            if !background.set_param(&binding.name, value) {
+                scene.set_param(&binding.name, value);
+            }
         }
         scene.update(frame);
 
         let aspect = width as f32 / height.max(1) as f32;
+        // Fixed-order composite (ADR-0018): the backdrop first (it owns the clear),
+        // then the active scene loads over it.
+        background.render(&ctx.queue, encoder, view);
         scene.render(&ctx.queue, encoder, view, aspect);
 
-        // One scene pass, plus the optional text and overlay passes below.
-        let mut draw_calls = 1u32;
+        // Background + scene, plus the optional text and overlay passes below.
+        let mut draw_calls = 2u32;
 
         // On-canvas text (browse overlay / HUD): a second pass that loads the
         // scene and composites the queued runs on top, in the same frame
@@ -610,6 +632,7 @@ impl Renderer {
         // so the same (name, frame, frames) always yields identical pixels and
         // differential probes (Phase 3) isolate the stimulus, not history.
         self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
+        self.background.reset_resources();
         self.time = 0.0;
         // The rebuilt scenes are fresh — re-apply the active preset's structural
         // config (ADR-0007) so a line scene captures with its geometry built.
@@ -677,6 +700,7 @@ impl Renderer {
         let mut analyzer = crate::dsp::Analyzer::new(format).map_err(RenderError::AudioFormat)?;
 
         self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
+        self.background.reset_resources();
         self.time = 0.0;
         self.configure_active_scene();
 

@@ -1,0 +1,25 @@
+# Rose Atmosphere - a slow, cool rose floating over a tinted gradient backdrop:
+# the Phase 3 demo of the engine background pass (ADR-0018). The sparse strokes
+# let the vignetted blue-violet gradient show through behind them, and the bass
+# lifts the backdrop brightness so the whole frame breathes on the low end.
+system = "parametric_curve"
+name   = "Rose Atmosphere"
+
+[curve]
+family = "maurer_rose"
+
+[params]
+n             = "4"
+d             = "133"
+samples       = "361"
+scale         = "0.78"
+spin          = "0.08 + mid * 0.2"
+hue           = "0.62 + treb * 0.2"
+thickness     = "1.4 + bass * 1.6"
+brightness    = "0.9 + clamp(bass * 0.5, 0, 0.5)"
+draw_progress = "1"
+# Engine background pass (ADR-0018): a vignetted blue-violet gradient that lifts
+# with the bass and drifts its hue slowly.
+bg_hue        = "0.66 + time * 0.01"
+bg_bright     = "0.22 + clamp(bass * 0.5, 0, 0.28)"
+bg_vignette   = "0.65"

@@ -33,14 +33,6 @@ use crate::dsp::AnalysisFrame;
 /// Maps `thickness` to an NDC-y half-width (see the parametric scene).
 const WIDTH_SCALE: f32 = 0.003;
 
-/// Near-black background so the additive glow reads.
-const CLEAR: wgpu::Color = wgpu::Color {
-    r: 0.01,
-    g: 0.008,
-    b: 0.02,
-    a: 1.0,
-};
-
 const DEFAULT_VISIBLE_DEPTH: f32 = 1.0;
 const DEFAULT_ROTATION: f32 = 0.0;
 const DEFAULT_HUE: f32 = 0.3;
@@ -229,16 +221,9 @@ impl Scene for LSystemScene {
             pan: [self.pan_x, self.pan_y],
             _pad: 0.0,
         };
-        self.renderer.borrow_mut().draw(
-            queue,
-            encoder,
-            view,
-            aspect,
-            1.0,
-            CLEAR,
-            xform,
-            &self.draw_buf,
-        );
+        self.renderer
+            .borrow_mut()
+            .draw(queue, encoder, view, aspect, 1.0, xform, &self.draw_buf);
     }
 }
 

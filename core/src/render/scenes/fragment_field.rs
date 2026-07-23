@@ -270,7 +270,9 @@ impl Scene for FragmentFieldScene {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    // Load over the engine backdrop (ADR-0018); this fullscreen
+                    // field is opaque, so it covers the backdrop as before.
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],

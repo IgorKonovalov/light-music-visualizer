@@ -28,15 +28,6 @@ use crate::dsp::AnalysisFrame;
 /// NDC-y half-width; `thickness = 2` gives a comfortably thick projector line.
 const WIDTH_SCALE: f32 = 0.003;
 
-/// Background the curve is stroked over — a near-black so the additive glow
-/// reads.
-const CLEAR: wgpu::Color = wgpu::Color {
-    r: 0.01,
-    g: 0.008,
-    b: 0.02,
-    a: 1.0,
-};
-
 // Parameter defaults — a calm, whole, slowly turning rose when nothing is bound.
 const DEFAULT_N: f32 = 6.0;
 const DEFAULT_D: f32 = 71.0;
@@ -208,15 +199,8 @@ impl Scene for ParametricCurveScene {
             pan: [self.pan_x, self.pan_y],
             _pad: 0.0,
         };
-        self.renderer.borrow_mut().draw(
-            queue,
-            encoder,
-            view,
-            aspect,
-            1.0,
-            CLEAR,
-            xform,
-            &self.segments,
-        );
+        self.renderer
+            .borrow_mut()
+            .draw(queue, encoder, view, aspect, 1.0, xform, &self.segments);
     }
 }

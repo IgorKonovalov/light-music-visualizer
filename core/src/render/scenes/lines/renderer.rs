@@ -237,13 +237,14 @@ impl LineRenderer {
         self.capacity
     }
 
-    /// Clear `view` to `clear` and draw `segments` as thick glowing quads at the
-    /// given `aspect` and `glow` multiplier, under the shared `xform` camera
-    /// transform (zoom/pan, ADR-0018). Segments beyond [`capacity`] are dropped
-    /// defensively (the scene is responsible for capping at load).
+    /// Draw `segments` as thick glowing quads at the given `aspect` and `glow`
+    /// multiplier, under the shared `xform` camera transform (zoom/pan, ADR-0018),
+    /// **loading** over the engine backdrop rather than clearing (Plan 0018 Phase
+    /// 3 — the background pass owns the clear). Segments beyond [`capacity`] are
+    /// dropped defensively (the scene is responsible for capping at load).
     #[allow(
         clippy::too_many_arguments,
-        reason = "distinct GPU handles plus the per-frame draw parameters (aspect, glow, clear, \
+        reason = "distinct GPU handles plus the per-frame draw parameters (aspect, glow, \
                   view transform); bundling them would only shuffle the same values behind a \
                   one-use struct"
     )]
@@ -254,7 +255,6 @@ impl LineRenderer {
         view: &wgpu::TextureView,
         aspect: f32,
         glow: f32,
-        clear: wgpu::Color,
         xform: super::ViewTransform,
         segments: &[SegmentInstance],
     ) {
@@ -279,7 +279,9 @@ impl LineRenderer {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear),
+                    // Load over the engine backdrop (ADR-0018); additive strokes
+                    // bloom over it and the empty space reveals it.
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -289,7 +291,7 @@ impl LineRenderer {
             multiview_mask: None,
         });
         if drawn.is_empty() {
-            return; // cleared the frame; nothing to stroke
+            return; // nothing to stroke; the backdrop shows through
         }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
