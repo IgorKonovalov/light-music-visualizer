@@ -186,11 +186,15 @@ not one phase. This is architectural integrity, not line-by-line style. Run five
 - **God modules / tight coupling.** Files doing five jobs; scene code branching on GPU backend;
   standalone code reaching past the core's API.
 
-### 3. Doc/diagram freshness
+### 3. Doc/diagram freshness & release bookkeeping
 - Are diagrams still accurate after new components/data flows? Update if not.
 - Did the plan get `Status: done` and move to `docs/plans/done/`? Is `docs/plans/README.md`
   refreshed (roster → recently-closed, execution order, next-free-number)? Are paired ADRs
   flipped `proposed → accepted` with `docs/adrs/README.md` matching?
+- **Version bump owed.** This plan's close ceremony owes one `cargo-release` version bump (step 4
+  of Close-ceremony bookkeeping below) unless the plan is genuinely docs/chore-only. It is the
+  most-forgotten close step — flag it here during the review so it can't slip when you do the
+  bookkeeping.
 
 ### 4. Correctness & determinism (audio/DSP-specific)
 - **Boundary validation.** Sample-rate / channel-count / buffer-size checked once where audio
@@ -249,9 +253,25 @@ All architect-owned, committed to `main` by explicit path (see "Commit hygiene" 
    verdict, what was verified) and **`git mv` the file to `docs/plans/done/`**.
 2. **Accept any paired ADRs** (`proposed → accepted`) and refresh `docs/adrs/README.md`.
 3. **Refresh `docs/plans/README.md`**: roster → recently-closed, execution order, next-free-number.
+4. **Bump the application version.** This is the step that chronically gets skipped (the version
+   sat at `0.2.0` across five feature plans that each forgot it), so treat it as non-optional and
+   decide it deliberately every close. Per
+   [ADR-0005](../../../docs/adrs/0005-versioning-and-release-cadence.md) / `docs/releasing.md`, the
+   version moves **once per plan, here, by you** — never per phase, never by `dev`. Pick the level
+   from what the plan shipped: **minor** for a feature plan, **patch** for a fix-only plan, **none**
+   for a genuinely docs/chore-only plan (a deliberate call, not a miss). Then run it — it stages the
+   version edit and writes the `vX.Y.Z` tag but does **not** push (the user pushes):
 
-(This project runs the lightweight harness — no git-worktree parallelism or automated version
-bump yet. If those get added later, they become an ADR + extra close-ceremony steps.)
+   ```sh
+   cargo release <patch|minor> --no-push --no-publish --no-confirm --execute
+   ```
+
+   The version lives once, in root `Cargo.toml` `[workspace.package].version`; both crates inherit
+   it. This is a separate axis from the C ABI version (`LMV_ABI_VERSION`), which moves only on an
+   `extern "C"` shape change (ADR-0003) — never couple the two.
+
+(This project runs the lightweight harness — no git-worktree parallelism yet. If that gets added
+later, it becomes an ADR + extra close-ceremony steps.)
 
 ---
 

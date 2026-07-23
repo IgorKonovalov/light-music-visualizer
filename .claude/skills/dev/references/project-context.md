@@ -4,7 +4,8 @@ Where things live and the canonical commands. Trust `Glob`/`git` over this when 
 
 ## Repo layout (Cargo workspace)
 
-Plan 0001 builds this out; not all exists yet. Trust `Glob` for what's real.
+Intended shape for orientation, not an inventory — trust `Glob`/`git` for what actually exists
+today (the tree has grown well past the founding scaffold).
 
 ```
 core/            # Rust library crate — DSP + render + scenes + C ABI.

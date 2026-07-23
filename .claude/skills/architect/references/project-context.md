@@ -16,9 +16,10 @@ samples into GPU-rendered visuals via **wgpu**. Two frontends consume the core:
 The core is **source-agnostic**: it accepts PCM frames and a render target and knows nothing
 about where they came from. That single abstraction is why one visual codebase serves both.
 
-## Planned repo layout (as of the founding scaffold)
+## Repo layout
 
-Cargo workspace. Not all of this exists yet — Plan 0001 builds it. Trust `Glob` for what's real.
+Cargo workspace. This is the intended shape for orientation, not an inventory — trust
+`Glob`/`git` for what actually exists today (the tree has grown well past the founding scaffold).
 
 ```
 core/            # Rust library crate — DSP + render engine + scenes + C ABI.
@@ -67,19 +68,18 @@ that contradicts that file is a plan bug.
 
 ## Decisions on the record
 
+The live, complete list is **`docs/adrs/README.md`** — read it for anything current; this file
+does not enumerate the ADRs (there are many). The one you must know cold is the founding decision:
+
 - **[ADR-0001](../../../docs/adrs/0001-rust-core-wgpu-cabi-foobar-shim.md)** (accepted) — Rust
   core, wgpu rendering, C ABI, C++ foobar shim. Rejected: C++ core, Electron/web, OpenGL, two
-  separate implementations. This is the founding decision; everything else hangs off it.
-
-Check `docs/adrs/README.md` for the live list — this file lags.
+  separate implementations. Everything else hangs off it; don't reopen it without a superseding ADR.
 
 ## Plans in flight
 
-- **[Plan 0001](../../../docs/plans/0001-core-and-standalone-mvp.md)** — Core + standalone MVP,
-  then foobar parity. 8 phases: workspace → Windows loopback → DSP → wgpu spectrum → scenes →
-  C ABI → foobar plugin → macOS capture.
-
-Check `docs/plans/README.md` for the live roster and next-free-number.
+Read **`docs/plans/README.md`** for the live roster, execution order, and next-free-number — it is
+the authority, not this file. Closed plans live in `docs/plans/done/`. Don't hardcode a plan list
+here; the index is one glob away and this file would only go stale.
 
 ## Ownership map
 

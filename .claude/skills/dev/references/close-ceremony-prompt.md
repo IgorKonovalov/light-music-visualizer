@@ -39,8 +39,10 @@ Plan implemented and committed. Ready for the architect close ceremony.
 1. Review the whole plan against the ADRs and deliver it **in-conversation** (no review file).
 2. Flip the plan's `Status:` to `done`.
 3. `git mv` the plan to `docs/plans/done/<NNNN-slug>.md` and refresh the plan + ADR indexes.
+4. Bump the application version for this plan (`cargo-release`, one bump per plan, no push — the
+   most-forgotten close step; see `docs/releasing.md`).
 
-After the review, push the commits when you're ready.
+After the review, push the commits and the new `vX.Y.Z` tag when you're ready.
 ```
 
 ## Filling it in
