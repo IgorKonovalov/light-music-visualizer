@@ -45,8 +45,9 @@
 DECLARE_COMPONENT_VERSION(
     "Light Music Visualizer", FOO_LMV_VERSION,
     "Light Music Visualizer\n"
-    "Spectrum, pulse and starfield scenes rendered by the shared lmv-core "
-    "Rust engine (wgpu).\n"
+    "Audio-reactive scenes - fragment fields, particle swarm, line geometry "
+    "(curves / L-systems / star patterns), reaction-diffusion and attractor "
+    "flows - rendered by the shared lmv-core Rust engine (wgpu).\n"
     "Dockable as a Default UI panel or opened from the View menu. "
     "Space cycles scenes.");
 VALIDATE_COMPONENT_FILENAME("foo_lmv.dll");
@@ -706,7 +707,8 @@ public:
         return nullptr;
     }
     bool get_description(pfc::string_base &out) override {
-        out = "Audio-reactive visuals (spectrum, pulse, starfield) from "
+        out = "Audio-reactive visuals - fragment fields, particle swarm, line "
+              "geometry, reaction-diffusion and attractor scenes - from "
               "lmv-core. Space cycles scenes.";
         return true;
     }
