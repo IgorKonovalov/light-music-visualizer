@@ -1,8 +1,8 @@
 # ADR-0023 — The golden drift guard renders frozen per-system fixtures, not shipped presets
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-23
-> **Related plan(s):** 0022-golden-fixtures-decouple-content (proposed); the golden capture
+> **Related plan(s):** 0022-golden-fixtures-decouple-content (done); the golden capture
 > tests it repoints originate in Plan 0013
 > **Related ADRs:** [0016](0016-gpu-tests-opt-in-ci-scope.md) (headless GPU tests skip when no
 > adapter — golden's WARP-only execution); [0017](0017-preset-author-skill-lane.md) (the content

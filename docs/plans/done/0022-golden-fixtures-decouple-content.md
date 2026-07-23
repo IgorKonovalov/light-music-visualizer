@@ -1,6 +1,22 @@
 # 0022 — Decouple the golden drift guard from shipped presets (per-system frozen fixtures)
 
-> **Status:** in-progress — ready for `dev`; approved 2026-07-23
+> **Status:** done — closed 2026-07-23, passed Mode 4 review (no blockers, no majors; one minor,
+> one nit). Two `dev` phase commits (`def9b24` per-system fixtures + repointed golden; `19e7123`
+> engine-vs-content doc split). Golden now guards **engine rendering determinism** via six frozen
+> per-system fixture TOMLs under `core/tests/fixtures/` (one per `SystemKind`, keyed by an exhaustive
+> `match` so a new scene fails to compile until its fixture exists), never shipped content — closing
+> the prior zero coverage of the three line-family systems (`parametric_curve`/`lsystem`/
+> `star_pattern`). The three shipped baselines (`aurora`/`warp`/`drift`.png) are deleted; no test
+> pins a shipped preset by name, and the shipped roster keeps its behavioral floors (`sanity`/
+> `reactivity`/`animation`, all iterating `default_presets()`). Landing this **greens `main`** from
+> the `76a2fb4` drift. Verified: `cargo test -p lmv-core --test golden` green on WARP with a real
+> comparison (not a skip); all six variants have exactly one fixture + baseline; no shipped-name pin
+> remains. **Minor:** the `SYSTEMS` iteration list is hand-maintained separately from the exhaustive
+> `fixture()` match, so a new variant is forced to add a fixture *arm* but not forced into `SYSTEMS`
+> — coverage is only half self-enforced (followup: assert `SYSTEMS.len()` == variant count).
+> **Nit:** `FRAMES = 60` warms the stateless line/fragment fixtures needlessly (harmless).
+> **Version: no bump** — test + docs only, zero shipped-artifact change (chore-only per ADR-0005/
+> `docs/releasing.md`, a deliberate call).
 > **Created:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0023](../adrs/0023-golden-drift-guard-uses-frozen-fixtures.md) (this plan's

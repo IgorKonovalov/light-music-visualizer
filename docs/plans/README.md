@@ -15,7 +15,6 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | [0019](0019-preset-grammar-v2.md) | Preset expression grammar v2: branching, math functions, tempo, typo warnings | approved | Grow the preset expression language so authors stop hitting walls: add math functions (`cos sqrt pow smoothstep mod`) + constants (`pi tau`), branching (six comparison operators yielding `0/1` + a `select(cond,x,y)` conditional), and two new variables — `tempo` and experimental `novelty` (plumb the already-computed `AnalysisFrame.bpm`/`novelty`, no new DSP). Fix the silent-typo footgun — an unknown parameter name becomes a surfaced load **warning** (preset still loads its good bindings), backed by each system declaring its param vocabulary. Rewrite the stale `docs/presets.md` (claims 10 presets / 2 systems; code ships 17 / 5) last. Core-only, allocation-free/panic-free per frame, **C ABI untouched**; no new DSP, no boolean ops, no ternary, no Rhai. Pre-1.0 so no backward-compat obligation (additions are incidentally non-breaking). [ADR-0020](../adrs/0020-preset-grammar-v2-branching-functions-tempo.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); from `preset-author`-lane grammar feedback. |
 | [0020](0020-shared-palette-system.md) | Shared palette system: gradient LUT, named + custom palettes, bindable color | approved | Give presets real color control. Both preset-driven scenes hardcode the **same** iq cosine palette, so a preset's only color lever is a scalar `hue` offset — fragment fields can't hold a cohesive mood and swarm color is unreachable (per-particle hue is random across the full wheel, making `hue` a visual no-op). Add one shared `core/src/render/palette.rs` that bakes a gradient (built-in **named** palette or **custom stops**) into a 256-entry LUT every scene colors through — delivered to the fragment scene as a 256x1 1D texture, sampled on CPU by the swarm — plus **fully bindable** color via layer-2 named params (`saturation`, `hue`, fragment `color_span`/`color_center`, swarm `hue_spread`/`hue_center`) and an A/B `palette_mix` crossfade for bindable palette *selection*. Default `spectrum` palette = the exact current cosine, so the 17 shipped presets are **visually unchanged** until re-authored. Adds one thin off-hot-path `Scene::set_palette` hook (second widening after ADR-0007's `configure`). Core-only, **C ABI frozen**, no new dependency; from `preset-author`-lane color feedback (commit 76a2fb4). [ADR-0021](../adrs/0021-shared-palette-system.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); rejected in-shader stop-array, cosine-coefficient params, minimal per-scene fix, bindable integer palette index, OKLab color management. **Independent of the `dt` coupling** (touches preset schema + scene shaders, not the render clock) — can land anytime. |
 | [0021](0021-decouple-preset-content-from-code.md) | Decouple preset content from code: build-time embedding + single-source system names | approved | Shipping a preset is currently a code change: `core/src/preset/mod.rs` hand-lists every embedded preset as an `include_str!` tuple, so adding a `.toml` means editing the array, bumping its length, and bumping a count assert in `core/tests/preset.rs` (the reaction-diffusion work just paid this, 17->18). Add a zero-dependency `core/build.rs` that globs `presets/*.toml` at build time and generates the `EMBEDDED` list (`rerun-if-changed`), so **dropping a `.toml` in `presets/` ships it with no Rust edit**; the count test becomes structural (all-parse + floor). Phase 2 folds in a related DRY cleanup: the `SystemKind` name<->kind mapping, duplicated in `schema.rs::from_name` + `shot.rs::parse_system` + `shot.rs::system_name`, collapses to one public source in core that `shot` reuses. Also simplifies the `preset-author`->`dev` curation handoff (embedding becomes "commit the file"). Core + one CLI helper; **C ABI frozen, no new dependency**; the project's first build script. [ADR-0022](../adrs/0022-build-time-preset-embedding.md); rejected the `include_dir` crate, a slice-only tweak, load-only, and an in-repo proc-macro. Independent of the `dt` coupling; can land anytime. |
-| [0022](0022-golden-fixtures-decouple-content.md) | Decouple the golden drift guard from shipped presets (per-system frozen fixtures) | approved | `core/tests/golden.rs` pins its drift baselines to three **shipped, curated presets** (`Aurora`/`Warp Drive`/`Drift`) — exactly what the `preset-author` lane tunes — so every intentional content change trips the engine-drift alarm and reds CI (it did: commit `76a2fb4` moved all three past tolerance). Repoint golden at **test-only frozen fixtures, one per `SystemKind`**, authored as TOML under `core/tests/fixtures/` and keyed by an **exhaustive match** so a new scene must add a fixture (closes today's zero coverage of the three line-family systems). Shipped presets **drop all golden pixel-pinning** and keep only their behavioral floors (`sanity`/`reactivity`/`animation`); the three shipped baselines are deleted. Landing this also **greens `main`** from the `76a2fb4` drift. [ADR-0023](../adrs/0023-golden-drift-guard-uses-frozen-fixtures.md); rejected keeping golden on shipped presets, a loose pin on shipped too, per-idiom fixtures, and embedded consts / reusing `default_presets()`. Test-only, **C ABI frozen**, no `ci.yml` change; independent of the `dt` coupling, can land anytime. Cross-plan coordination: Plan 0014 has now **landed**, so `SystemKind::ReactionDiffusion` exists and the exhaustive match forces 0022 to add its fixture. **0022 also greens `main`** (still red from `76a2fb4`) — it is the immediate next plan. |
 
 ## Recommended execution sequence
 
@@ -25,13 +24,10 @@ render clock (`Renderer::render(&frame, dt)`, `Scene::advance`, `SCENE_DT` retir
 C ABI **v4 `lmv_render_dt`**, and the `ReactionDiffusion` scene all exist for the plans below to build
 against; see Recently closed. Plan 0013's capture/visual-QA harness landed before it.)
 
-1. **[0022] Decouple golden from shipped presets** — **immediate next**: it greens `main` (red since
-   `76a2fb4`) and its exhaustive `SystemKind` match now *must* add a `ReactionDiffusion` fixture
-   (0014 landed). Test-only, C ABI frozen ([ADR-0023](../adrs/0023-golden-drift-guard-uses-frozen-fixtures.md)).
-2. **[0016] GPU compute-particle scenes (attractors)** — reuses 0014's now-landed `PingPongField`
+1. **[0016] GPU compute-particle scenes (attractors)** — reuses 0014's now-landed `PingPongField`
    (trails) and injected-`dt` clock. Introduces the first compute pipeline in core
    ([ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md)). **Approved** — ready for `dev`.
-3. **[0018] Engine-wide visual enrichment (zoom/atmosphere/easing/mirrors)** — Phases 5-7 (easing,
+2. **[0018] Engine-wide visual enrichment (zoom/atmosphere/easing/mirrors)** — Phases 5-7 (easing,
    trails, screen-space kaleidoscope) reuse 0014's now-landed injected `dt` + offscreen/present +
    `PingPongField`; Phases 1-4 (view transform, background, geometry mirror) are independent.
    Engine-wide composite + easing seam
@@ -73,6 +69,29 @@ lane whose color feedback (commit 76a2fb4) motivated it. Core-only, C ABI frozen
   iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0022 — Decouple the golden drift guard from shipped presets (per-system frozen fixtures)](done/0022-golden-fixtures-decouple-content.md) —
+  **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; one minor, one nit). Two `dev`
+  phase commits (`def9b24` per-system fixtures + repointed golden; `19e7123` engine-vs-content doc
+  split). Golden (`core/tests/golden.rs`) previously pinned baselines to three **shipped, curated
+  presets** (`Aurora`/`Warp Drive`/`Drift`), so every intended content tune tripped the engine-drift
+  alarm and reds CI (concretely `76a2fb4`). Repointed it at six **test-only frozen fixtures** under
+  `core/tests/fixtures/` — one per `SystemKind`, keyed by an **exhaustive `match`** with no wildcard
+  arm so a new scene fails to compile until its fixture exists — loaded via `set_presets` and
+  captured by name; baselines blessed on WARP. Closes the prior **zero** golden coverage of the three
+  line-family systems (`parametric_curve`/`lsystem`/`star_pattern`, each feeding the shared line
+  renderer through a different generator). The three shipped baselines are **deleted**; no test pins a
+  shipped preset by name, and the shipped roster keeps its behavioral floors (`sanity`/`reactivity`/
+  `animation`, all iterating `default_presets()`). **Landing this greened `main`** from the `76a2fb4`
+  drift. Verified: `cargo test -p lmv-core --test golden` green on WARP with a **real comparison**
+  (not an adapterless skip); all six variants have exactly one fixture + baseline. Per
+  [ADR-0023](../adrs/0023-golden-drift-guard-uses-frozen-fixtures.md) (now **accepted**). **Test +
+  docs only — no production, C ABI (still v4), or `ci.yml` change.** **Minor (non-blocking followup):**
+  the `SYSTEMS` iteration list is hand-maintained separately from the exhaustive `fixture()` match, so
+  a new variant is compiler-forced to add a fixture *arm* but **not** forced into `SYSTEMS` — coverage
+  is only half self-enforced (fix: assert `SYSTEMS.len()` == variant count). **Nit:** `FRAMES = 60`
+  warms the stateless line/fragment fixtures needlessly (harmless). **Version: no bump** — zero
+  shipped-artifact change (chore-only per ADR-0005/`docs/releasing.md`, a deliberate call, not a miss).
 
 - [0014 — Reaction-diffusion feedback scene + frame-rate-independent render clock](done/0014-reaction-diffusion-feedback-scene.md) —
   **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; two minor, two nits). Six `dev`
