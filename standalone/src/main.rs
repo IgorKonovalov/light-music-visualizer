@@ -7,6 +7,7 @@ mod diaglog;
 mod director;
 mod overlay;
 mod rss;
+mod soak;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -19,6 +20,7 @@ use lmv_core::audio::{AudioFormat, SampleConsumer};
 use lmv_core::dsp::Analyzer;
 use lmv_core::render::{Renderer, TextRun};
 use overlay::{OverlayAction, OverlayKey, OverlayState};
+use soak::SoakLog;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -100,6 +102,9 @@ struct AppState {
     /// Wall-clock time of the previous rendered frame, for measuring the `dt`
     /// fed to the director. Shell frame pacing only — core stays clock-free.
     last_frame: Instant,
+    /// Long-run soak sampler, present only with `--soak` (else the render loop
+    /// is byte-unchanged).
+    soak: Option<SoakLog>,
 }
 
 /// Narrow alias so the non-Windows build (no capture until Phase 9) compiles
@@ -119,6 +124,7 @@ impl AppState {
         config: Config,
         config_path: Option<PathBuf>,
         display_index: usize,
+        soak_path: Option<PathBuf>,
     ) -> Self {
         let size = window.inner_size();
         let mut renderer = Renderer::new(Arc::clone(&window), size.width, size.height)
@@ -167,6 +173,7 @@ impl AppState {
             last_preset_poll: start,
             director: Director::from_config(&config.rotate),
             last_frame: start,
+            soak: soak_path.map(SoakLog::new),
             config,
             config_path,
             display_index,
@@ -319,6 +326,12 @@ impl AppState {
         // seconds a sample is actually due.
         let metrics = self.renderer.metrics();
         self.diag_log.maybe_log(&metrics, rss::current_rss_bytes);
+        // Long-run soak trace (opt-in). Absent unless `--soak` was passed, so the
+        // normal loop is unaffected; when present it samples only every few
+        // seconds, off the per-frame path.
+        if let Some(soak) = self.soak.as_mut() {
+            soak.maybe_sample(&metrics, rss::current_rss_bytes);
+        }
         self.window.request_redraw();
     }
 
@@ -586,6 +599,8 @@ struct App {
     /// it is then handed to the `AppState` for live edits + persistence.
     config: Config,
     config_path: Option<PathBuf>,
+    /// Soak-log path from `--soak`, or `None` when the mode is off.
+    soak_path: Option<PathBuf>,
     state: Option<AppState>,
 }
 
@@ -621,6 +636,7 @@ impl ApplicationHandler for App {
                         std::mem::take(&mut self.config),
                         self.config_path.take(),
                         display_index,
+                        self.soak_path.take(),
                     );
                     state.window.request_redraw();
                     self.state = Some(state);
@@ -709,6 +725,35 @@ fn resolve_log_path() -> Option<PathBuf> {
 /// config then loads defaults and hotkey changes apply live but don't persist.
 fn resolve_config_path() -> Option<PathBuf> {
     preset_data_root().map(|root| root.join(APP_DIR_NAME).join("config.toml"))
+}
+
+/// The soak-log path if `--soak` was passed (`--soak <path>` / `--soak=<path>`,
+/// or a bare `--soak` for the default under the per-user dir), else `None` so
+/// the soak sampler is never created and the render loop is unchanged.
+fn parse_soak_arg() -> Option<PathBuf> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if let Some(path) = arg.strip_prefix("--soak=") {
+            return Some(PathBuf::from(path));
+        }
+        if arg == "--soak" {
+            // An explicit path may follow; otherwise use the default location.
+            return match args.next() {
+                Some(next) if !next.starts_with("--") => Some(PathBuf::from(next)),
+                _ => Some(default_soak_path()),
+            };
+        }
+    }
+    None
+}
+
+/// Default soak-log location: under the per-user app dir, or `soak.log` in the
+/// current directory if that can't be resolved — so `--soak` always logs
+/// somewhere.
+fn default_soak_path() -> PathBuf {
+    preset_data_root()
+        .map(|root| root.join(APP_DIR_NAME).join("soak.log"))
+        .unwrap_or_else(|| PathBuf::from("soak.log"))
 }
 
 /// Pick the monitor for the configured output, returning its index in
@@ -862,9 +907,12 @@ fn main() {
     let config_path = resolve_config_path();
     let config = config_path.as_deref().map(Config::load).unwrap_or_default();
 
+    let soak_path = parse_soak_arg();
+
     let mut app = App {
         config,
         config_path,
+        soak_path,
         state: None,
     };
     if let Err(err) = event_loop.run_app(&mut app) {
