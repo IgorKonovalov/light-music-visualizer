@@ -19,6 +19,7 @@
 
 pub mod capture;
 pub mod context;
+pub mod feedback;
 pub mod metrics;
 pub mod overlay;
 mod overlay_font;
@@ -58,6 +59,7 @@ fn system_slot(system: SystemKind) -> usize {
         SystemKind::ParametricCurve => 2,
         SystemKind::LSystem => 3,
         SystemKind::StarPattern => 4,
+        SystemKind::ReactionDiffusion => 5,
     }
 }
 

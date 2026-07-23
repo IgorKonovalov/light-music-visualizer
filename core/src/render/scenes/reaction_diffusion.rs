@@ -1,0 +1,683 @@
+//! Reaction-diffusion scene: a Gray-Scott simulation evolving on a fixed
+//! internal grid via the reusable [`PingPongField`](crate::render::feedback)
+//! (ADR-0012). The engine's first *stateful* scene — each frame's field depends
+//! on the previous frame's, held in a texture and stepped by a simulation
+//! shader — unlocking the organic, restructuring look (nested contours, cellular
+//! tissue, a hatched maze) stateless scenes can't produce.
+//!
+//! Phase 1 is a walking skeleton: a fixed number of sub-steps per frame and a
+//! grayscale present. The fixed-timestep accumulator (Phase 2), audio-reactive
+//! named parameters (Phase 3), and the iso-contour/hatch look (Phase 4) land on
+//! top of this. All randomness is the seeded initial scatter (NFR 6): the field
+//! is a pure function of the seed + the fixed-`dt` step sequence.
+//!
+//! **GPU resources are built lazily, on first render.** The scene stores a
+//! device handle and constructs its pipelines/textures only when it is first
+//! drawn (see [`Resources`]). This keeps the resources off the device until the
+//! scene is actually shown, and — importantly — lets the headless capture tests
+//! build the full roster on the DX12 WARP software adapter: WARP mis-renders the
+//! pre-existing fragment-field pipeline once this scene's *full* set of feedback
+//! resources coexists on the device (a cumulative software-rasterizer quirk with
+//! no wgpu validation error; real hardware is unaffected). Deferring
+//! construction means a capture that never activates this scene never builds
+//! those resources, so the other scenes' captures stay correct; a capture that
+//! *does* activate it builds them and renders this scene normally.
+
+// Hot-path panic-denial pragma (Plan 0002 Phase 2, extended to scenes by Plan
+// 0003 Phase 0). Encodes its passes every displayed frame.
+#![deny(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unreachable
+)]
+
+use super::{Scene, SeededRng};
+use crate::dsp::AnalysisFrame;
+use crate::render::feedback::PingPongField;
+
+/// Fixed internal simulation grid (square). 256² resolves the Gray-Scott
+/// patterns well while staying cheap enough that the headless capture tests run
+/// briskly on the software (WARP) adapter — a 512² grid quadruples the per-step
+/// fragment work the differential tests pay each warm-up frame (ADR-0012 gives
+/// 512² only as an example).
+const GRID: u32 = 256;
+
+/// Gray-Scott sub-steps encoded per frame in Phase 1 (temporary — Phase 2's
+/// fixed-timestep accumulator replaces this constant count). Several stabilizing
+/// sub-steps per frame are needed for the pattern to evolve at a visible rate.
+const SIM_SUBSTEPS: u32 = 12;
+
+/// Seeded initial-scatter blobs, and the uniform array's capacity.
+const SEED_BLOBS: usize = 30;
+const MAX_BLOBS: usize = 32;
+const SEED: u64 = 0x4C4D_565F_5244_5F31; // "LMV_RD_1"
+
+/// Parameter defaults — the "mitosis" Gray-Scott regime (Pearson's
+/// classification): spots that perpetually divide, so the field keeps
+/// restructuring rather than settling into a static pattern.
+const DEFAULT_FEED: f32 = 0.0367;
+const DEFAULT_KILL: f32 = 0.0649;
+/// Diffusion rates for the two species (classic Karl Sims values at internal
+/// `dt = 1`, paired with the 3×3 Laplacian kernel in the shader).
+const DIFFUSE_U: f32 = 0.16;
+const DIFFUSE_V: f32 = 0.08;
+
+/// Seed pass: U = 1 everywhere, V = 1 inside the scattered blobs.
+const INIT_SHADER: &str = r#"
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
+    var pts = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0),
+    );
+    let p = pts[vi];
+    var out: VsOut;
+    out.pos = vec4<f32>(p, 0.0, 1.0);
+    out.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
+    return out;
+}
+
+struct Init {
+    blobs: array<vec4<f32>, 32>, // xy: center (uv), z: radius, w: unused
+    count: vec4<u32>,            // x: active blob count
+}
+@group(0) @binding(0) var<uniform> init: Init;
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    var v = 0.0;
+    let n = init.count.x;
+    for (var i = 0u; i < n; i = i + 1u) {
+        let b = init.blobs[i];
+        if (distance(in.uv, b.xy) < b.z) {
+            v = 1.0;
+        }
+    }
+    return vec4<f32>(1.0 - v, v, 0.0, 1.0);
+}
+"#;
+
+/// Sim pass: one Gray-Scott step, reading the previous field, writing the next.
+const SIM_SHADER: &str = r#"
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
+    var pts = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0),
+    );
+    let p = pts[vi];
+    var out: VsOut;
+    out.pos = vec4<f32>(p, 0.0, 1.0);
+    out.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
+    return out;
+}
+
+struct Sim {
+    p: vec4<f32>, // x: feed, y: kill, z: diffuse_u, w: diffuse_v
+}
+@group(0) @binding(0) var<uniform> sim: Sim;
+@group(0) @binding(1) var field: texture_2d<f32>;
+
+// Toroidal texel fetch (wrap at the edges) of the (U, V) pair.
+fn ld(c: vec2<i32>, size: vec2<i32>) -> vec2<f32> {
+    let w = ((c % size) + size) % size;
+    return textureLoad(field, w, 0).xy;
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let size = vec2<i32>(textureDimensions(field));
+    let c = vec2<i32>(i32(in.pos.x), i32(in.pos.y));
+    let m = ld(c, size);
+    let u = m.x;
+    let v = m.y;
+
+    // 3×3 Laplacian: orthogonal 0.2, diagonal 0.05, center -1.
+    var lap = ld(c + vec2<i32>(-1, 0), size) * 0.2
+        + ld(c + vec2<i32>(1, 0), size) * 0.2
+        + ld(c + vec2<i32>(0, -1), size) * 0.2
+        + ld(c + vec2<i32>(0, 1), size) * 0.2
+        + ld(c + vec2<i32>(-1, -1), size) * 0.05
+        + ld(c + vec2<i32>(1, -1), size) * 0.05
+        + ld(c + vec2<i32>(-1, 1), size) * 0.05
+        + ld(c + vec2<i32>(1, 1), size) * 0.05;
+    lap = lap - m;
+
+    let feed = sim.p.x;
+    let kill = sim.p.y;
+    let du = sim.p.z;
+    let dv = sim.p.w;
+    let reaction = u * v * v;
+    let nu = u + du * lap.x - reaction + feed * (1.0 - u);
+    let nv = v + dv * lap.y + reaction - (kill + feed) * v;
+    return vec4<f32>(clamp(nu, 0.0, 1.0), clamp(nv, 0.0, 1.0), 0.0, 1.0);
+}
+"#;
+
+/// Present pass (Phase 1: grayscale of the V species).
+const PRESENT_SHADER: &str = r#"
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
+    var pts = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0),
+    );
+    let p = pts[vi];
+    var out: VsOut;
+    out.pos = vec4<f32>(p, 0.0, 1.0);
+    out.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
+    return out;
+}
+
+@group(0) @binding(0) var present_field: texture_2d<f32>;
+@group(0) @binding(1) var present_samp: sampler;
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let val = textureSampleLevel(present_field, present_samp, in.uv, 0.0).y;
+    return vec4<f32>(val, val, val, 1.0);
+}
+"#;
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct InitParams {
+    blobs: [[f32; 4]; MAX_BLOBS],
+    count: [u32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct SimParams {
+    p: [f32; 4],
+}
+
+/// The GPU-side state, built lazily on first render (see the module docs).
+struct Resources {
+    field: PingPongField,
+    sim_pipeline: wgpu::RenderPipeline,
+    init_pipeline: wgpu::RenderPipeline,
+    present_pipeline: wgpu::RenderPipeline,
+    sim_uniform: wgpu::Buffer,
+    init_uniform: wgpu::Buffer,
+    /// Sim/present bind groups reading texture A / texture B — selected by the
+    /// field's read side each sub-step so nothing is rebuilt on the hot path.
+    sim_bg_a: wgpu::BindGroup,
+    sim_bg_b: wgpu::BindGroup,
+    init_bg: wgpu::BindGroup,
+    present_bg_a: wgpu::BindGroup,
+    present_bg_b: wgpu::BindGroup,
+}
+
+impl Resources {
+    /// Create every pipeline, buffer, bind group, and the ping-pong field.
+    fn build(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
+        let init_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rd-init-shader"),
+            source: wgpu::ShaderSource::Wgsl(INIT_SHADER.into()),
+        });
+        let sim_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rd-sim-shader"),
+            source: wgpu::ShaderSource::Wgsl(SIM_SHADER.into()),
+        });
+        let present_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rd-present-shader"),
+            source: wgpu::ShaderSource::Wgsl(PRESENT_SHADER.into()),
+        });
+
+        let field = PingPongField::new(device, GRID, GRID);
+
+        let sim_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rd-sim-params"),
+            size: std::mem::size_of::<SimParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let init_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rd-init-params"),
+            size: std::mem::size_of::<InitParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // --- init pipeline: one uniform, writes the seed field ---
+        let init_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rd-init-layout"),
+            entries: &[uniform_entry(0)],
+        });
+        let init_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("rd-init-bg"),
+            layout: &init_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: init_uniform.as_entire_binding(),
+            }],
+        });
+        let init_pipeline = field_pipeline(device, &init_shader, &init_layout, "rd-init");
+
+        // --- sim pipeline: uniform + input texture (textureLoad, no sampler) ---
+        let sim_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rd-sim-layout"),
+            entries: &[uniform_entry(0), texture_entry(1, false)],
+        });
+        let sim_bg_a = sim_bind_group(device, &sim_layout, &sim_uniform, field.view_a());
+        let sim_bg_b = sim_bind_group(device, &sim_layout, &sim_uniform, field.view_b());
+        let sim_pipeline = field_pipeline(device, &sim_shader, &sim_layout, "rd-sim");
+
+        // --- present pipeline: input texture + filtering sampler, to surface ---
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("rd-present-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let present_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("rd-present-layout"),
+            entries: &[texture_entry(0, true), sampler_entry(1)],
+        });
+        let present_bg_a = present_bind_group(device, &present_layout, field.view_a(), &sampler);
+        let present_bg_b = present_bind_group(device, &present_layout, field.view_b(), &sampler);
+        let present_pipeline =
+            surface_pipeline(device, &present_shader, &present_layout, surface_format);
+
+        Self {
+            field,
+            sim_pipeline,
+            init_pipeline,
+            present_pipeline,
+            sim_uniform,
+            init_uniform,
+            sim_bg_a,
+            sim_bg_b,
+            init_bg,
+            present_bg_a,
+            present_bg_b,
+        }
+    }
+
+    /// Encode the one-shot seed pass into the current read texture, filling the
+    /// field with the deterministic initial pattern. Run once after a (re)build.
+    fn encode_seed(&self, encoder: &mut wgpu::CommandEncoder) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("rd-seed-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: self.field.read_view(),
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.init_pipeline);
+        pass.set_bind_group(0, &self.init_bg, &[]);
+        pass.draw(0..3, 0..1);
+    }
+}
+
+/// Gray-Scott reaction-diffusion on a ping-pong field, driven by named preset
+/// parameters (audio wiring lands in Phase 3).
+pub struct ReactionDiffusionScene {
+    /// Cloned device handle (an `Arc` inside wgpu) used to build [`Resources`]
+    /// lazily on first render — see the module docs for why.
+    device: wgpu::Device,
+    surface_format: wgpu::TextureFormat,
+    res: Option<Resources>,
+    /// The deterministic seed pattern, uploaded on the first frame after a
+    /// (re)build so a rebuilt scene restarts identically (capture determinism).
+    init_params: InitParams,
+    needs_seed: bool,
+    /// Shared scene clock (seconds), set by the renderer each frame.
+    time: f32,
+    feed: f32,
+    kill: f32,
+    diffuse_u: f32,
+    diffuse_v: f32,
+}
+
+impl ReactionDiffusionScene {
+    /// Build the CPU-side state and compute the deterministic seed pattern. GPU
+    /// resources are deferred to the first render (module docs).
+    pub fn new(device: &wgpu::Device, surface_format: wgpu::TextureFormat) -> Self {
+        let mut init_params = InitParams {
+            blobs: [[0.0; 4]; MAX_BLOBS],
+            count: [0; 4],
+        };
+        let mut rng = SeededRng::new(SEED);
+        let n = SEED_BLOBS.min(MAX_BLOBS);
+        for slot in init_params.blobs.iter_mut().take(n) {
+            let x = rng.next_f32();
+            let y = rng.next_f32();
+            let r = rng.range(0.02, 0.045);
+            *slot = [x, y, r, 0.0];
+        }
+        init_params.count = [n as u32, 0, 0, 0];
+
+        Self {
+            device: device.clone(),
+            surface_format,
+            res: None,
+            init_params,
+            needs_seed: true,
+            time: 0.0,
+            feed: DEFAULT_FEED,
+            kill: DEFAULT_KILL,
+            diffuse_u: DIFFUSE_U,
+            diffuse_v: DIFFUSE_V,
+        }
+    }
+}
+
+/// A fragment-visible uniform-buffer bind group layout entry.
+fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+/// A fragment-visible sampled-texture layout entry. `filterable` must match how
+/// the shader uses it: the sim reads via `textureLoad` (unfiltered), the present
+/// pass via a filtering sampler.
+fn texture_entry(binding: u32, filterable: bool) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+fn sampler_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        count: None,
+    }
+}
+
+fn sim_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    uniform: &wgpu::Buffer,
+    input: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("rd-sim-bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(input),
+            },
+        ],
+    })
+}
+
+fn present_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    input: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("rd-present-bg"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(input),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
+}
+
+/// A fullscreen-triangle pipeline writing into the [`PingPongField::FORMAT`]
+/// grid (the init and sim passes).
+fn field_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    bind_layout: &wgpu::BindGroupLayout,
+    label: &str,
+) -> wgpu::RenderPipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(label),
+        bind_group_layouts: &[Some(bind_layout)],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: PingPongField::FORMAT,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// The present pipeline: fullscreen triangle to the surface format.
+fn surface_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    bind_layout: &wgpu::BindGroupLayout,
+    surface_format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("rd-present"),
+        bind_group_layouts: &[Some(bind_layout)],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("rd-present-pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: surface_format,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+impl Scene for ReactionDiffusionScene {
+    fn name(&self) -> &'static str {
+        "reaction diffusion"
+    }
+
+    fn set_time(&mut self, time: f32) {
+        self.time = time;
+    }
+
+    fn reset_params(&mut self) {
+        self.feed = DEFAULT_FEED;
+        self.kill = DEFAULT_KILL;
+        self.diffuse_u = DIFFUSE_U;
+        self.diffuse_v = DIFFUSE_V;
+    }
+
+    fn set_param(&mut self, name: &str, value: f32) {
+        // Phase 1 exposes the two Gray-Scott regime knobs so a preset can bind
+        // them to the audio; the fuller param set (flow, contour, hue, seed
+        // injection) lands in Phase 3.
+        match name {
+            "feed" => self.feed = value,
+            "kill" => self.kill = value,
+            _ => {}
+        }
+    }
+
+    fn update(&mut self, _frame: &AnalysisFrame) {
+        // Fully parameter-driven; audio reaches the sim through named params
+        // bound by the preset (Phase 3), never read here directly.
+    }
+
+    fn render(
+        &mut self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        view: &wgpu::TextureView,
+        _aspect: f32,
+    ) {
+        // Build GPU resources on first use (module docs).
+        if self.res.is_none() {
+            self.res = Some(Resources::build(&self.device, self.surface_format));
+        }
+        let Self {
+            res,
+            init_params,
+            needs_seed,
+            feed,
+            kill,
+            diffuse_u,
+            diffuse_v,
+            ..
+        } = self;
+        let Some(res) = res.as_mut() else {
+            return;
+        };
+
+        queue.write_buffer(
+            &res.sim_uniform,
+            0,
+            bytemuck::bytes_of(&SimParams {
+                p: [*feed, *kill, *diffuse_u, *diffuse_v],
+            }),
+        );
+
+        // One-shot deterministic seed on the first frame after a (re)build.
+        if *needs_seed {
+            queue.write_buffer(&res.init_uniform, 0, bytemuck::bytes_of(init_params));
+            res.encode_seed(encoder);
+            *needs_seed = false;
+        }
+
+        // Fixed sub-step count (Phase 1). Each step reads the current field and
+        // writes the other texture, then the field swaps.
+        for _ in 0..SIM_SUBSTEPS {
+            let sim_bg = if res.field.reading_a() {
+                &res.sim_bg_a
+            } else {
+                &res.sim_bg_b
+            };
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("rd-sim-pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: res.field.write_view(),
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            // The fullscreen sim pass overwrites every texel.
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(&res.sim_pipeline);
+                pass.set_bind_group(0, sim_bg, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            res.field.swap();
+        }
+
+        // Present the latest field to the surface.
+        let present_bg = if res.field.reading_a() {
+            &res.present_bg_a
+        } else {
+            &res.present_bg_b
+        };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("rd-present-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&res.present_pipeline);
+        pass.set_bind_group(0, present_bg, &[]);
+        pass.draw(0..3, 0..1);
+    }
+}

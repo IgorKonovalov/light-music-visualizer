@@ -1,6 +1,6 @@
 # 0014 — Reaction-diffusion feedback scene + frame-rate-independent render clock
 
-> **Status:** approved
+> **Status:** in-progress
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev
 > **Related ADRs:** [0012](../adrs/0012-stateful-feedback-render-system.md) (stateful feedback render system), [0013](../adrs/0013-c-abi-v4-render-dt.md) (C ABI v4: lmv_render_dt), [0002](../adrs/0002-layered-preset-architecture.md) (preset layers)

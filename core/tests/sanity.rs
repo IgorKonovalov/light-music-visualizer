@@ -33,7 +33,11 @@ const MIN_QUADRANTS: u8 = 2;
 /// frame; the sparse swarm need only paint a small but real footprint.
 fn coverage_floor(system: SystemKind) -> f32 {
     match system {
+        // Full-screen field fills most of the frame.
         SystemKind::FragmentField => 0.30,
+        // Reaction-diffusion paints a real pattern across the frame, but the
+        // present maps only the sparse V species, so the lit fraction is modest.
+        SystemKind::ReactionDiffusion => 0.03,
         // Sparse line art / point swarm: a small but real footprint.
         SystemKind::Swarm
         | SystemKind::ParametricCurve
@@ -49,6 +53,7 @@ fn system_name(system: SystemKind) -> &'static str {
         SystemKind::ParametricCurve => "parametric_curve",
         SystemKind::LSystem => "lsystem",
         SystemKind::StarPattern => "star_pattern",
+        SystemKind::ReactionDiffusion => "reaction_diffusion",
     }
 }
 

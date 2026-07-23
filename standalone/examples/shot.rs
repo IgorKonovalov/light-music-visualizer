@@ -173,8 +173,9 @@ fn parse_system(name: &str) -> Result<SystemKind, String> {
         "parametric_curve" => Ok(SystemKind::ParametricCurve),
         "lsystem" => Ok(SystemKind::LSystem),
         "star_pattern" => Ok(SystemKind::StarPattern),
+        "reaction_diffusion" => Ok(SystemKind::ReactionDiffusion),
         other => Err(format!(
-            "unknown family `{other}` (fragment_field | swarm | parametric_curve | lsystem | star_pattern)"
+            "unknown family `{other}` (fragment_field | swarm | parametric_curve | lsystem | star_pattern | reaction_diffusion)"
         )),
     }
 }
@@ -653,6 +654,7 @@ fn report(args: Args, presets: Vec<Preset>, source: &str) -> Result<(), String> 
         SystemKind::ParametricCurve,
         SystemKind::LSystem,
         SystemKind::StarPattern,
+        SystemKind::ReactionDiffusion,
     ];
     let mut reports = Vec::new();
     for system in families {
@@ -801,6 +803,7 @@ fn system_name(system: SystemKind) -> &'static str {
         SystemKind::ParametricCurve => "parametric_curve",
         SystemKind::LSystem => "lsystem",
         SystemKind::StarPattern => "star_pattern",
+        SystemKind::ReactionDiffusion => "reaction_diffusion",
     }
 }
 

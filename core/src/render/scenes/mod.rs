@@ -17,6 +17,7 @@
 
 pub mod fragment_field;
 pub mod lines;
+pub mod reaction_diffusion;
 pub mod swarm;
 
 use crate::dsp::AnalysisFrame;
@@ -92,6 +93,10 @@ pub(crate) fn create_all(
         Box::new(lines::ParametricCurveScene::new(line_renderer.clone())),
         Box::new(lines::LSystemScene::new(line_renderer.clone())),
         Box::new(lines::StarPatternScene::new(line_renderer.clone())),
+        Box::new(reaction_diffusion::ReactionDiffusionScene::new(
+            device,
+            surface_format,
+        )),
     ]
 }
 

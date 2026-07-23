@@ -1,0 +1,19 @@
+# Coral - a Gray-Scott reaction-diffusion field (ADR-0012). The engine's first
+# stateful feedback scene: the pattern grows and reorganizes frame to frame in
+# the mitosis regime (spots that perpetually divide).
+#
+# Phase 1 exposes the two regime knobs (feed / kill). Bass gently pushes the
+# feed rate and mid the kill rate, so the pattern's character shifts with the
+# music. The richer reactivity (flow, seed injection on beats) and the
+# iso-contour look land in later phases.
+#
+# Variables available to expressions: bass mid treb onset beat bar time.
+system = "reaction_diffusion"
+name = "Coral"
+
+# feed/kill stay inside the pattern-forming band across the whole audio range
+# (silent -> mitosis, full bass -> coral): a louder mix thickens the structure
+# rather than starving it, so the field never dies out.
+[params]
+feed = "0.032 + clamp(bass * 4, 0, 1) * 0.018"
+kill = "0.060 + clamp(mid * 4, 0, 1) * 0.002"

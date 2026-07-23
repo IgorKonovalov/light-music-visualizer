@@ -242,7 +242,7 @@ fn embedded_default_presets_all_parse() {
     let presets = lmv_core::preset::default_presets();
     assert_eq!(
         presets.len(),
-        17,
+        18,
         "all shipped curated presets should compile"
     );
     assert!(
