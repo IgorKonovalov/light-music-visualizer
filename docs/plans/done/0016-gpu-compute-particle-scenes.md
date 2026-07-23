@@ -1,9 +1,36 @@
 # 0016 — GPU compute-particle scenes: strange attractors
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev
 > **Related ADRs:** [0015-gpu-compute-particle-idiom](../adrs/0015-gpu-compute-particle-idiom.md); extends [0002-layered-preset-architecture](../adrs/0002-layered-preset-architecture.md) layer 2; reuses [0012-stateful-feedback-render-system](../adrs/0012-stateful-feedback-render-system.md)'s `PingPongField`
+
+> **Closed 2026-07-23** — passed Mode 4 review (no blockers, no majors; two minor, three
+> nits). Five `dev` phase commits (`79b6cf0`, `937fdfb`, `9acc415`, `7ec850a`, `aa34d25`)
+> landing the engine's **first GPU compute pipeline** (ADR-0015 idiom B, now **accepted**): a
+> 50k-particle storage buffer stepped through a strange-attractor map by a compute shader and
+> drawn as additive point-sprites with fading trails via Plan 0014's `PingPongField` (no second
+> feedback mechanism). Four families (De Jong, Clifford 2D discrete; Thomas, Lorenz 3D flows),
+> selected **data-driven** via a `[particles]` table through the existing ADR-0007 `configure`
+> hook (the shared `GeneratorConfig` gained a `Particles` variant — **no new `Scene` trait
+> method**); all knobs (`a,b,c,d,size,hue,fade,reseed`) are ADR-0002 layer-2 named params; init
+> is `SeededRng`-seeded and the compute step reads no clock (frame-rate independence via the
+> accumulator, NFR §6). Four curated presets embedded (18→22). Also closed the Plan 0022
+> half-enforced-coverage followup: a `SYSTEMS`-covers-every-variant guard in `golden.rs`
+> (verified to bite). **C ABI frozen at v4, no new dependency.** Verified: `nextest 68/68`
+> (incl. `attractor_contract` seed-reproducibility + beat perturbation + 3D Lorenz path, golden
+> attractor baseline byte-identical on WARP, preset count 22), `clippy -p lmv-core -p standalone
+> --all-targets -D warnings` clean, `fmt` clean; all four families eyeballed distinct via `shot`.
+> **Minor:** (1) the trail field is a fixed 16:9 offscreen presented stretched (aspect ignored,
+> like the RD present) — correct on a 16:9 display, distorted otherwise; (2) the shared
+> `GeneratorConfig` still lives in `lines/mod.rs`, so `lines` now references
+> `particles::AttractorFamily` — a future tidy could relocate it to `scenes/mod.rs`. **Nits:**
+> the coverage guard is compile-*nudged* not airtight (`VARIANT_COUNT` literal; full rigor needs
+> an enum-iteration dep, out of scope); first-activation lazy-build hitch (same as Plan 0014's
+> cycle-to-Coral); redundant present-pass clear. **⚠ On-device carry-forwards** (non-blocking,
+> like prior plans): 60 fps @ 1080p + low-end iGPU compute/additive-fill smoke →
+> `docs/on-device-validation.md`; the four family presets run hot at high energy
+> (`preset-author`-lane tuning, not engine work). Version **minor 0.5.0 → 0.6.0** at close.
 
 ## TL;DR
 
