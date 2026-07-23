@@ -1,6 +1,6 @@
 # 0024 — Single-source the foobar component version + refresh stale plugin descriptions
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0025-foobar-component-version-single-sourced](../adrs/0025-foobar-component-version-single-sourced.md); supplements [ADR-0005](../adrs/0005-versioning-and-release-cadence.md); revises the "plugin version remains independent" note from [Plan 0006](done/0006-versioning-wiring.md)
