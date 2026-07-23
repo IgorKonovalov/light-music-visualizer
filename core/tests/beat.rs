@@ -15,7 +15,7 @@
 use lmv_core::audio::AudioFormat;
 use lmv_core::dsp::{Analyzer, HOP_SIZE};
 use lmv_core::preset::Preset;
-use lmv_core::render::{HeadlessOptions, Renderer, metrics::frame_diff};
+use lmv_core::render::{HeadlessOptions, RenderError, Renderer, metrics::frame_diff};
 use lmv_core::signal::click_track;
 
 const SIZE: u32 = 96;
@@ -99,12 +99,20 @@ fn beat_accent_preset_responds_on_beat() {
     assert!(between < flags.len(), "a non-beat frame follows the beat");
     let at = [beat_idx as u32, between as u32];
 
-    let mut renderer = Renderer::new_headless(HeadlessOptions {
+    // No GPU adapter (macOS has no software Metal fallback) is a logged skip,
+    // not a failure (ADR-0016); any other build error still panics loudly.
+    let mut renderer = match Renderer::new_headless(HeadlessOptions {
         width: SIZE,
         height: SIZE,
         prefer_software: true,
-    })
-    .expect("headless renderer builds on the software adapter");
+    }) {
+        Ok(r) => r,
+        Err(RenderError::RequestAdapter(_)) => {
+            eprintln!("skipped: no GPU adapter on this runner (ADR-0016)");
+            return;
+        }
+        Err(e) => panic!("headless renderer build failed: {e}"),
+    };
 
     renderer.set_presets(vec![live_preset()]);
     let live = renderer

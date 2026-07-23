@@ -11,7 +11,7 @@
 use lmv_core::dsp::AnalysisFrame;
 use lmv_core::preset::{SystemKind, default_presets};
 use lmv_core::render::{
-    CaptureImage, HeadlessOptions, Renderer,
+    CaptureImage, HeadlessOptions, RenderError, Renderer,
     metrics::{frame_diff, struct_diff},
 };
 
@@ -20,13 +20,22 @@ const FRAMES: u32 = 60;
 /// A `struct_diff` below this flags a pair as near-duplicate geometry.
 const NEAR_DUP_STRUCT: f32 = 0.08;
 
-fn headless() -> Renderer {
-    Renderer::new_headless(HeadlessOptions {
+/// Build a headless `Renderer`, or `None` (a logged skip) when the runner
+/// exposes no GPU adapter — macOS has no software Metal fallback (ADR-0016).
+/// Any other build error still panics loudly.
+fn headless() -> Option<Renderer> {
+    match Renderer::new_headless(HeadlessOptions {
         width: SIZE,
         height: SIZE,
         prefer_software: true,
-    })
-    .expect("headless renderer builds on the software adapter")
+    }) {
+        Ok(r) => Some(r),
+        Err(RenderError::RequestAdapter(_)) => {
+            eprintln!("skipped: no GPU adapter on this runner (ADR-0016)");
+            None
+        }
+        Err(e) => panic!("headless renderer build failed: {e}"),
+    }
 }
 
 /// One representative non-silent frame, shared by every capture so the only
@@ -64,7 +73,9 @@ fn print_matrix(
 
 #[test]
 fn report_family_distinctness() {
-    let mut renderer = headless();
+    let Some(mut renderer) = headless() else {
+        return;
+    };
     let frame = fixed_frame();
 
     for (system, label) in [

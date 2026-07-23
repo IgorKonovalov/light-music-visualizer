@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use lmv_core::dsp::AnalysisFrame;
-use lmv_core::render::{CaptureImage, HeadlessOptions, Renderer, metrics::frame_diff};
+use lmv_core::render::{CaptureImage, HeadlessOptions, RenderError, Renderer, metrics::frame_diff};
 
 const SIZE: u32 = 128;
 /// Mean per-channel difference (0..1) a fresh render may drift from baseline.
@@ -53,13 +53,22 @@ fn golden_dir() -> PathBuf {
         .join("golden")
 }
 
-fn headless() -> Renderer {
-    Renderer::new_headless(HeadlessOptions {
+/// Build a headless `Renderer`, or `None` (a logged skip) when the runner
+/// exposes no GPU adapter — macOS has no software Metal fallback (ADR-0016).
+/// Any other build error still panics loudly.
+fn headless() -> Option<Renderer> {
+    match Renderer::new_headless(HeadlessOptions {
         width: SIZE,
         height: SIZE,
         prefer_software: true,
-    })
-    .expect("headless renderer builds on the software adapter")
+    }) {
+        Ok(r) => Some(r),
+        Err(RenderError::RequestAdapter(_)) => {
+            eprintln!("skipped: no GPU adapter on this runner (ADR-0016)");
+            None
+        }
+        Err(e) => panic!("headless renderer build failed: {e}"),
+    }
 }
 
 /// The fixed frame every baseline is rendered under (a representative
@@ -111,7 +120,9 @@ fn max_channel_outlier(a: &CaptureImage, b: &CaptureImage) -> u8 {
 
 #[test]
 fn scenes_match_golden_baselines() {
-    let mut renderer = headless();
+    let Some(mut renderer) = headless() else {
+        return;
+    };
     let frame = fixed_frame();
     let bless = std::env::var_os("LMV_BLESS").is_some();
     std::fs::create_dir_all(golden_dir()).expect("create tests/golden");

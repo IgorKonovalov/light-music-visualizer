@@ -17,7 +17,7 @@
 use lmv_core::dsp::AnalysisFrame;
 use lmv_core::preset::{SystemKind, default_presets};
 use lmv_core::render::{
-    CaptureImage, HeadlessOptions, Renderer,
+    CaptureImage, HeadlessOptions, RenderError, Renderer,
     metrics::{coverage, quadrant_spread},
 };
 
@@ -52,13 +52,22 @@ fn system_name(system: SystemKind) -> &'static str {
     }
 }
 
-fn headless() -> Renderer {
-    Renderer::new_headless(HeadlessOptions {
+/// Build a headless `Renderer`, or `None` (a logged skip) when the runner
+/// exposes no GPU adapter — macOS has no software Metal fallback (ADR-0016).
+/// Any other build error still panics loudly.
+fn headless() -> Option<Renderer> {
+    match Renderer::new_headless(HeadlessOptions {
         width: SIZE,
         height: SIZE,
         prefer_software: true,
-    })
-    .expect("headless renderer builds on the software adapter")
+    }) {
+        Ok(r) => Some(r),
+        Err(RenderError::RequestAdapter(_)) => {
+            eprintln!("skipped: no GPU adapter on this runner (ADR-0016)");
+            None
+        }
+        Err(e) => panic!("headless renderer build failed: {e}"),
+    }
 }
 
 /// A sustained "loud" frame: every band up and a beat, so any audio-gated
@@ -88,7 +97,9 @@ fn background(img: &CaptureImage) -> [u8; 4] {
 
 #[test]
 fn every_preset_draws_a_real_shape() {
-    let mut renderer = headless();
+    let Some(mut renderer) = headless() else {
+        return;
+    };
     let frame = loud();
 
     let mut failures = Vec::new();

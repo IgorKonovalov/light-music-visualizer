@@ -9,7 +9,7 @@
 
 use lmv_core::dsp::AnalysisFrame;
 use lmv_core::preset::{SystemKind, default_presets};
-use lmv_core::render::{HeadlessOptions, Renderer, metrics::frame_diff};
+use lmv_core::render::{HeadlessOptions, RenderError, Renderer, metrics::frame_diff};
 
 /// Small offscreen size — the differential signal doesn't need resolution, and
 /// the software adapter is slow.
@@ -30,13 +30,22 @@ fn system_name(system: SystemKind) -> &'static str {
     }
 }
 
-fn headless() -> Renderer {
-    Renderer::new_headless(HeadlessOptions {
+/// Build a headless `Renderer`, or `None` (a logged skip) when the runner
+/// exposes no GPU adapter — macOS has no software Metal fallback (ADR-0016).
+/// Any other build error still panics loudly.
+fn headless() -> Option<Renderer> {
+    match Renderer::new_headless(HeadlessOptions {
         width: SIZE,
         height: SIZE,
         prefer_software: true,
-    })
-    .expect("headless renderer builds on the software adapter")
+    }) {
+        Ok(r) => Some(r),
+        Err(RenderError::RequestAdapter(_)) => {
+            eprintln!("skipped: no GPU adapter on this runner (ADR-0016)");
+            None
+        }
+        Err(e) => panic!("headless renderer build failed: {e}"),
+    }
 }
 
 /// The four single-band stimuli, each a sustained constant frame.
@@ -76,7 +85,9 @@ fn stimuli() -> [(&'static str, AnalysisFrame); 4] {
 
 #[test]
 fn every_preset_reacts_to_at_least_one_band() {
-    let mut renderer = headless();
+    let Some(mut renderer) = headless() else {
+        return;
+    };
     let silent = AnalysisFrame::default();
 
     let mut failures = Vec::new();
