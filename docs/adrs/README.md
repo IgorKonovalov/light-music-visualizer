@@ -7,7 +7,7 @@ ADR that supersedes the old one and update the status here.
 Rule of thumb: if you can't name an option you're *not* taking, you don't need an ADR —
 you need a code comment.
 
-**Next free number: 0024**
+**Next free number: 0025**
 
 | ADR  | Title                                                      | Status   |
 |------|------------------------------------------------------------|----------|
@@ -34,3 +34,4 @@ you need a code comment.
 | [0021](0021-shared-palette-system.md) | Shared preset-controllable palette system: baked gradient LUT (named + custom stops), bindable color modulation + A/B crossfade (supplements 0002) | proposed |
 | [0022](0022-build-time-preset-embedding.md) | Build-time embedding of the preset library: zero-dep `core/build.rs` generates `EMBEDDED` from `presets/*.toml` (drop a file, it ships; no code edit) | proposed |
 | [0023](0023-golden-drift-guard-uses-frozen-fixtures.md) | Golden drift guard renders frozen per-system test fixtures (exhaustive `match SystemKind`), not shipped presets; shipped presets keep only behavioral floors | accepted |
+| [0024](0024-cross-preset-transitions.md) | Cross-preset transitions: two-input blend stage over the engine composite, adaptive dual-live/freeze, engine-default policy (builds on 0018) | proposed |
