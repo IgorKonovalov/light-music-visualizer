@@ -7,7 +7,8 @@
 #     coral), staying inside the pattern-forming band so the field never dies;
 #   - treble scales the diffusion, coarsening the spatial texture;
 #   - each beat stamps a fresh seed of growth into the field.
-# The iso-contour / palette look lands in a later phase (still grayscale here).
+# The look (iso-contour loops + hatch + palette) drifts its hue slowly over time
+# and with treble, and its glow swells with the low/mid energy.
 #
 # Variables available to expressions: bass mid treb onset beat bar time.
 system = "reaction_diffusion"
@@ -18,3 +19,5 @@ feed = "0.032 + clamp(bass * 4, 0, 1) * 0.018"
 kill = "0.060 + clamp(mid * 4, 0, 1) * 0.002"
 flow = "1.0 + clamp(treb * 4, 0, 1) * 0.4"
 inject = "beat"
+hue = "time * 0.015 + clamp(treb * 3, 0, 1) * 0.12"
+glow = "0.7 + clamp((bass + mid) * 3, 0, 1) * 0.6"

@@ -75,6 +75,13 @@ const DIFFUSE_V: f32 = 0.08;
 /// `flow` default: unscaled diffusion.
 const DEFAULT_FLOW: f32 = 1.0;
 
+/// Present-look defaults (Phase 4): palette hue offset, iso-contour band count,
+/// hatch stripe spacing in texels, and glow strength.
+const DEFAULT_HUE: f32 = 0.0;
+const DEFAULT_CONTOUR: f32 = 6.0;
+const DEFAULT_HATCH: f32 = 5.0;
+const DEFAULT_GLOW: f32 = 1.0;
+
 /// Beat-stamped seed injection (Phase 3). A rising `inject` edge stamps a blob
 /// of V into the field at the next seeded position, so a beat spawns new growth.
 /// Positions come from a `SeededRng` (NFR 6) so a capture reproduces exactly.
@@ -190,7 +197,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
-/// Present pass (Phase 1: grayscale of the V species).
+/// Present pass (Phase 4): the reference aesthetic — analytic iso-contours of
+/// the V field with `fwidth` anti-aliasing, a cosine palette coloring the nested
+/// loops, gradient-aligned hatch/comb ticks, and a soft glow.
 const PRESENT_SHADER: &str = r#"
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -208,13 +217,76 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
     return out;
 }
 
+struct Present {
+    // x: hue, y: contour density, z: hatch frequency (texels), w: glow
+    a: vec4<f32>,
+}
 @group(0) @binding(0) var present_field: texture_2d<f32>;
 @group(0) @binding(1) var present_samp: sampler;
+@group(0) @binding(2) var<uniform> pp: Present;
+
+// iq-style cosine palette: smooth, loops in hue.
+fn palette(t: f32) -> vec3<f32> {
+    let a = vec3<f32>(0.5, 0.5, 0.5);
+    let b = vec3<f32>(0.5, 0.5, 0.5);
+    let c = vec3<f32>(1.0, 1.0, 1.0);
+    let d = vec3<f32>(0.0, 0.33, 0.67);
+    return a + b * cos(6.28318 * (c * t + d));
+}
+
+fn sample_v(uv: vec2<f32>) -> f32 {
+    return textureSampleLevel(present_field, present_samp, uv, 0.0).y;
+}
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let val = textureSampleLevel(present_field, present_samp, in.uv, 0.0).y;
-    return vec4<f32>(val, val, val, 1.0);
+    let dims = vec2<f32>(textureDimensions(present_field));
+    let texel = 1.0 / dims;
+    let uv = in.uv;
+
+    let v = sample_v(uv);
+
+    // Central-difference gradient of the field (for hatch orientation + edges).
+    let gx = sample_v(uv + vec2<f32>(texel.x, 0.0)) - sample_v(uv - vec2<f32>(texel.x, 0.0));
+    let gy = sample_v(uv + vec2<f32>(0.0, texel.y)) - sample_v(uv - vec2<f32>(0.0, texel.y));
+    let grad = vec2<f32>(gx, gy);
+    let gmag = length(grad);
+
+    let hue = pp.a.x;
+    let density = pp.a.y;
+    let hatch_freq = pp.a.z;
+    let glow = pp.a.w;
+
+    // Slope mask: contours and hatch only appear where the field actually
+    // slopes, so the flat V=0 background stays dark (V=0 is itself an iso-level,
+    // which would otherwise flood the flats).
+    let slope = smoothstep(0.0008, 0.004, gmag);
+
+    // Iso-contour lines: distance (in pixels) to the nearest V = k/density level,
+    // anti-aliased by fwidth. `contour` is ~1 on a line, 0 between them.
+    let f = v * density;
+    let line_d = abs(fract(f - 0.5) - 0.5) / max(fwidth(f), 1e-4);
+    let contour = (1.0 - clamp(line_d, 0.0, 1.0)) * slope;
+
+    // Palette by field level so the nested loops read as coloured bands.
+    let col = palette(v * 0.85 + hue);
+
+    // Hatch/comb: stripes along the contour tangent (perpendicular to grad),
+    // gated to the slopes so flats stay clean.
+    let tang = normalize(vec2<f32>(-grad.y, grad.x) + vec2<f32>(1e-5, 1e-5));
+    let s = dot(uv * dims, tang) / max(hatch_freq, 1.0);
+    let hatch = smoothstep(0.30, 0.5, abs(fract(s) - 0.5));
+    let hatch_amt = hatch * slope;
+
+    // Compose: dark bed, a coloured fill only where the field lives, bright
+    // contour loops, hatch ticks that darken along the slopes, and a soft glow.
+    let structure = smoothstep(0.04, 0.45, v);
+    var out_col = col * structure * 0.5;
+    out_col = out_col + col * contour * 0.9;
+    out_col = out_col * (1.0 - hatch_amt * 0.4);
+    out_col = out_col + col * v * glow * 0.22;
+
+    return vec4<f32>(out_col, 1.0);
 }
 "#;
 
@@ -234,6 +306,13 @@ struct SimParams {
     inj: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct PresentParams {
+    /// x: hue, y: contour density, z: hatch frequency (texels), w: glow.
+    a: [f32; 4],
+}
+
 /// The GPU-side state, built lazily on first render (see the module docs).
 struct Resources {
     field: PingPongField,
@@ -242,6 +321,7 @@ struct Resources {
     present_pipeline: wgpu::RenderPipeline,
     sim_uniform: wgpu::Buffer,
     init_uniform: wgpu::Buffer,
+    present_uniform: wgpu::Buffer,
     /// Sim/present bind groups reading texture A / texture B — selected by the
     /// field's read side each sub-step so nothing is rebuilt on the hot path.
     sim_bg_a: wgpu::BindGroup,
@@ -281,6 +361,12 @@ impl Resources {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let present_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rd-present-params"),
+            size: std::mem::size_of::<PresentParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         // --- init pipeline: one uniform, writes the seed field ---
         let init_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("rd-init-layout"),
@@ -317,10 +403,22 @@ impl Resources {
         });
         let present_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("rd-present-layout"),
-            entries: &[texture_entry(0, true), sampler_entry(1)],
+            entries: &[texture_entry(0, true), sampler_entry(1), uniform_entry(2)],
         });
-        let present_bg_a = present_bind_group(device, &present_layout, field.view_a(), &sampler);
-        let present_bg_b = present_bind_group(device, &present_layout, field.view_b(), &sampler);
+        let present_bg_a = present_bind_group(
+            device,
+            &present_layout,
+            field.view_a(),
+            &sampler,
+            &present_uniform,
+        );
+        let present_bg_b = present_bind_group(
+            device,
+            &present_layout,
+            field.view_b(),
+            &sampler,
+            &present_uniform,
+        );
         let present_pipeline =
             surface_pipeline(device, &present_shader, &present_layout, surface_format);
 
@@ -331,6 +429,7 @@ impl Resources {
             present_pipeline,
             sim_uniform,
             init_uniform,
+            present_uniform,
             sim_bg_a,
             sim_bg_b,
             init_bg,
@@ -398,6 +497,12 @@ pub struct ReactionDiffusionScene {
     flow: f32,
     /// This frame's injection level (bound to a beat/onset expression).
     inject: f32,
+    /// Present-look params (Phase 4): palette hue, iso-contour density, hatch
+    /// stripe spacing, glow strength.
+    hue: f32,
+    contour: f32,
+    hatch: f32,
+    glow: f32,
 }
 
 impl ReactionDiffusionScene {
@@ -434,6 +539,10 @@ impl ReactionDiffusionScene {
             kill: DEFAULT_KILL,
             flow: DEFAULT_FLOW,
             inject: 0.0,
+            hue: DEFAULT_HUE,
+            contour: DEFAULT_CONTOUR,
+            hatch: DEFAULT_HATCH,
+            glow: DEFAULT_GLOW,
         }
     }
 }
@@ -504,6 +613,7 @@ fn present_bind_group(
     layout: &wgpu::BindGroupLayout,
     input: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
+    uniform: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("rd-present-bg"),
@@ -516,6 +626,10 @@ fn present_bind_group(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: uniform.as_entire_binding(),
             },
         ],
     })
@@ -629,18 +743,26 @@ impl Scene for ReactionDiffusionScene {
         self.kill = DEFAULT_KILL;
         self.flow = DEFAULT_FLOW;
         self.inject = 0.0;
+        self.hue = DEFAULT_HUE;
+        self.contour = DEFAULT_CONTOUR;
+        self.hatch = DEFAULT_HATCH;
+        self.glow = DEFAULT_GLOW;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
         // ADR-0002 layer 2 knobs. `feed`/`kill` pick the regime; `flow` scales
         // the diffusion; `inject` is a beat/onset level whose rising edge stamps
-        // a seed (edge detected in `update`). The look params (hue, contour)
-        // land with the iso-contour present in Phase 4.
+        // a seed (edge detected in `update`). `hue`/`contour`/`hatch`/`glow`
+        // drive the iso-contour present look (Phase 4).
         match name {
             "feed" => self.feed = value,
             "kill" => self.kill = value,
             "flow" => self.flow = value,
             "inject" => self.inject = value,
+            "hue" => self.hue = value,
+            "contour" => self.contour = value,
+            "hatch" => self.hatch = value,
+            "glow" => self.glow = value,
             _ => {}
         }
     }
@@ -678,11 +800,23 @@ impl Scene for ReactionDiffusionScene {
             feed,
             kill,
             flow,
+            hue,
+            contour,
+            hatch,
+            glow,
             ..
         } = self;
         let Some(res) = res.as_mut() else {
             return;
         };
+
+        queue.write_buffer(
+            &res.present_uniform,
+            0,
+            bytemuck::bytes_of(&PresentParams {
+                a: [*hue, *contour, *hatch, *glow],
+            }),
+        );
 
         // A beat scheduled a stamp this frame (consumed here): the sim shader
         // applies it on every sub-step, so V saturates at the stamp. `[0; 4]`
