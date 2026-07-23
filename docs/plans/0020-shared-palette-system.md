@@ -4,27 +4,41 @@
 > **Created:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0021](../adrs/0021-shared-palette-system.md) (supplements [0002](../adrs/0002-layered-preset-architecture.md))
+> **Scope note (2026-07-23):** extended to **all four** shader-colored scenes. The reaction-diffusion
+> and attractor scenes — deferred to a followup when this plan was first drafted — were folded into
+> scope (new **Phase 5**) at the user's direction, prompted by `preset-author`-lane evidence: authoring
+> the warm coral trio (commit `5b64ad2`) hit RD's fixed `v*0.85` rainbow, the same wall this plan lifts
+> for fragment/swarm. The docs sweep moved to Phase 6.
 
 ## TL;DR
 
 Give presets real color control. Add one shared `core/src/render/palette.rs` that bakes a gradient
-— a built-in named palette **or** custom stops — into a 256-entry LUT every scene colors through,
-and expose color as **bindable** named params (`saturation`, `hue`, fragment `color_span`/
-`color_center`, swarm `hue_spread`/`hue_center`, plus an A/B `palette_mix` crossfade). First
-user-visible behavior: a fragment preset that sets `[palette] name = "ember"` renders a cohesive
-warm field instead of the fixed rainbow, and the 17 shipped presets look **unchanged** because the
-default palette (`spectrum`) is the exact current cosine. Core-only, C ABI frozen, no new dependency.
+— a built-in named palette **or** custom stops — into a 256-entry LUT **all four** shader-colored
+scenes (fragment field, swarm, reaction-diffusion, attractor) color through, and expose color as
+**bindable** named params (`saturation`, `hue`, fragment/RD `color_span`/`color_center`, swarm/
+attractor `hue_spread`/`hue_center`, plus an A/B `palette_mix` crossfade). First user-visible
+behavior: a fragment preset that sets `[palette] name = "ember"` renders a cohesive warm field
+instead of the fixed rainbow, and the shipped presets look **unchanged** because the default palette
+(`spectrum`) is the exact current cosine. Core-only, C ABI frozen, no new dependency.
 
 ## Context & problem
 
-Both preset-driven scenes hardcode the **same** iq cosine palette (`fragment_field.rs` WGSL
-`palette()`, `swarm.rs:262` CPU `palette()`), so a preset's only color lever is a scalar `hue`
-offset that rotates one rainbow. The `preset-author` lane hit two walls no preset can pass (commit
-`76a2fb4`): fragment fields can't hold a cohesive mood (the `field*0.6` span is fixed), and swarm
-color is unreachable (per-particle hue is random across the full wheel, so `hue` is a visual no-op).
+**Four** scenes each hardcode the **same** iq cosine palette (`fragment_field.rs` WGSL `palette()`,
+`swarm.rs:262` CPU `palette()`, `reaction_diffusion.rs` present-shader `palette()`,
+`particles/mod.rs:260` attractor vertex-shader `palette()`), so a preset's only color lever is a
+scalar `hue` offset that rotates one rainbow. The `preset-author` lane hit this wall on every one of
+them:
+- fragment fields can't hold a cohesive mood — the `field*0.6` span is fixed (commit `76a2fb4`);
+- swarm color is unreachable — per-particle hue is random across the full wheel, so `hue` is a
+  visual no-op (commit `76a2fb4`);
+- reaction-diffusion is locked to a rainbow — authoring the warm coral trio (commit `5b64ad2`) the
+  lane could only *rotate* RD's fixed `v*0.85` sweep, never narrow it to a single coral tone;
+- the attractor repeats the swarm's failure — a hardcoded `seed*0.15` per-particle hue jitter is its
+  only spread, unbindable.
+
 Color is a missing axis of the preset surface, and it is duplicated per scene — every new scene
-re-duplicates it. See [ADR-0021](../adrs/0021-shared-palette-system.md) for the decision and the
-rejected alternatives.
+re-duplicates it (RD and the attractor already have). See
+[ADR-0021](../adrs/0021-shared-palette-system.md) for the decision and the rejected alternatives.
 
 ## Decision
 
@@ -58,6 +72,10 @@ gradient -> [Rgb;256] LUT (a, b)"]
 sample 1D LUT texture(s)"]
             swarm["SwarmScene
 sample CPU LUT array(s)"]
+            rd["ReactionDiffusionScene
+present: sample 1D LUT texture(s)"]
+            att["AttractorScene
+vertex: sample 1D LUT texture(s)"]
         end
         setpal["Scene::set_palette(&Palette)
 (load-time hook)"]
@@ -68,9 +86,13 @@ sample CPU LUT array(s)"]
     cfg --> bake --> setpal
     setpal --> frag
     setpal --> swarm
+    setpal --> rd
+    setpal --> att
     prm --> setp
     setp --> frag
     setp --> swarm
+    setp --> rd
+    setp --> att
 ```
 
 ## Implementation phases
@@ -140,17 +162,54 @@ selectable named palette — that is already useful. `dev` runs all phases in on
 - **Note:** if scope must tighten, Phases 1–3 deliver strongly bindable color (hue/sat/span/spread)
   on their own; this phase adds bindable *selection* and is the natural cut line.
 
-### Phase 5 — Docs + no-regression sweep
+### Phase 5 — Reaction-diffusion + attractor through the shared module
+- **Owner skill:** dev
+- **Area:** core
+- **What:** Route the last two shader-colored scenes through `palette.rs`, reusing the mechanism
+  Phases 1–4 built (no new palette machinery — same baked LUT(s), same params, same `set_palette`
+  hook and `palette_mix`).
+  - **Reaction-diffusion** (`reaction_diffusion.rs`) — mirrors the fragment scene (Phase 1). Delete
+    the present shader's private `palette()`; bind the baked LUT(s) as a 256×1 1D texture + sampler
+    in the present bind group and sample it in place of the cosine. Replace the hardcoded `v * 0.85`
+    field-to-gradient coefficient with the bindable `color_span`, add `color_center`, and keep the
+    existing `hue`/`saturation` semantics — defaults (`color_span = 0.85`, `color_center = 0`)
+    reproduce today's look exactly. The field level `v` is the gradient coordinate, unchanged.
+  - **Attractor** (`particles/mod.rs`) — mirrors the swarm (Phase 3) but samples on the **GPU** in
+    the draw **vertex** shader (per-particle), so it takes the LUT as a 1D texture like the fragment
+    scene, not a CPU array. Delete the vertex shader's private `palette()`; replace
+    `palette(hue + seed * 0.15)` with a LUT sample at `hue_center + (seed - 0.5) * hue_spread`,
+    exposing the previously hardcoded `0.15` jitter as bindable `hue_spread` (defaults
+    `hue_spread = 0.15`, `hue_center = hue` semantics reproducing today's look). Both `[palette]`/
+    `[palette_b]` + `palette_mix` apply, so a preset can crossfade RD/attractor palettes like the
+    other two scenes.
+- **Files touched:** `core/src/render/scenes/reaction_diffusion.rs`,
+  `core/src/render/scenes/particles/mod.rs`, `core/tests/` (extend the palette + no-regression tests
+  to both scenes).
+- **Done when:** an RD preset with `[palette] name = "ember"` and a narrow `color_span` renders a
+  single-family warm coral (not a rainbow), and `color_span = 0.85` + `spectrum` reproduces the
+  shipped `Coral`/`Reef`/`Coral Bloom`/`Coral Head` look (a `shot --preset <it>` eyeball against a
+  pre-change capture); an attractor preset with `hue_spread = 0.1` renders a coherently-colored
+  attractor while `hue_spread = 0.15` reproduces today's look; the default-path no-regression unit
+  test (Phase 1) is extended to assert both scenes' default palette matches their prior cosine within
+  tolerance. Panic pragma present on any per-frame code touched (`particles/`/`reaction_diffusion.rs`
+  are already in the recursive `render/` hygiene scan).
+- **Note:** this phase adds **no** new preset-surface concept — it is pure scene wiring to the
+  Phase 1–4 mechanism, so it is a clean cut line if scope must tighten (RD/attractor simply stay on
+  the fixed cosine until a followup, exactly as before this plan was expanded).
+
+### Phase 6 — Docs + no-regression sweep
 - **Owner skill:** dev
 - **Area:** core
 - **What:** Document the palette surface (the `[palette]`/`[palette_b]` tables, the built-in palette
-  names, the new color params) where the preset surface is documented, coordinating with Plan 0019's
-  `docs/presets.md` rewrite (do not duplicate — add the color section to whatever that plan lands, or
-  a sibling doc if 0019 has not landed). Confirm all 17 shipped presets still load and render
-  visually unchanged on the default palette (`shot --all` eyeball against a pre-change capture).
+  names, the new color params, and that **all four** shader-colored scenes honor them) where the
+  preset surface is documented, coordinating with Plan 0019's `docs/presets.md` rewrite (do not
+  duplicate — add the color section to whatever that plan lands, or a sibling doc if 0019 has not
+  landed). Confirm every shipped preset still loads and renders visually unchanged on the default
+  palette (`shot --all` eyeball against a pre-change capture).
 - **Files touched:** `docs/` (preset surface doc), `presets/README.md`.
 - **Done when:** the palette surface is documented with one worked custom-stops example; `shot --all`
-  shows no visual change to the shipped presets versus a baseline captured before Phase 1.
+  shows no visual change to the shipped presets (all four scene families) versus a baseline captured
+  before Phase 1.
 
 ## Data shapes
 
@@ -219,9 +278,8 @@ impl Palette {
 
 ## Followups (after this lands)
 
-- **`preset-author`:** re-author the field/flock presets (and others) to use named/custom palettes
-  and `hue_spread`/`color_span`; flag strong ship candidates for `dev` to embed.
-- Apply the shared palette to the reaction-diffusion scene (Plan 0014) and the compute-particle
-  scene (Plan 0016) when they land — both should color through `palette.rs`, not a private fn.
+- **`preset-author`:** re-author the field/flock presets **and the reaction-diffusion coral set**
+  (commit `5b64ad2`) to use named/custom palettes and `hue_spread`/`color_span` — e.g. a true
+  single-tone coral once RD honors `color_span`; flag strong ship candidates for `dev` to embed.
 - Consider OKLab interpolation in the bake for perceptually even gradients (ADR-0021 Alt E).
 - Refresh the `preset-author` skill's `systems.md`/`grammar.md` snapshots for the new color surface.
