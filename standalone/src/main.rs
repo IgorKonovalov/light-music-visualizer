@@ -2,6 +2,7 @@
 mod capture_mac;
 #[cfg(windows)]
 mod capture_win;
+mod config;
 mod diaglog;
 mod overlay;
 mod rss;
@@ -10,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use config::Config;
 use diaglog::DiagLog;
 use lmv_core::audio::{AudioFormat, SampleConsumer};
 use lmv_core::dsp::Analyzer;
@@ -19,7 +21,8 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{Window, WindowId};
+use winit::monitor::MonitorHandle;
+use winit::window::{Fullscreen, Window, WindowId};
 
 /// How often the render loop wakes to keep DSP fed while hidden (NFR 1:
 /// near-zero GPU in the background, analysis stays warm).
@@ -78,6 +81,14 @@ struct AppState {
     preset_dir: PathBuf,
     preset_sig: Option<(u128, usize)>,
     last_preset_poll: Instant,
+    /// Operator config (display/fullscreen; grows in later phases) and where to
+    /// persist it. `config_path` is `None` when the per-user dir can't be
+    /// resolved — hotkey changes then apply live but don't persist.
+    config: Config,
+    config_path: Option<PathBuf>,
+    /// Index (into the live monitor list) of the display the operator has
+    /// selected — advanced by the `D` hotkey, used when going fullscreen.
+    display_index: usize,
 }
 
 /// Narrow alias so the non-Windows build (no capture until Phase 9) compiles
@@ -92,7 +103,12 @@ mod capture_handle {
 }
 
 impl AppState {
-    fn new(window: Arc<Window>) -> Self {
+    fn new(
+        window: Arc<Window>,
+        config: Config,
+        config_path: Option<PathBuf>,
+        display_index: usize,
+    ) -> Self {
         let size = window.inner_size();
         let mut renderer = Renderer::new(Arc::clone(&window), size.width, size.height)
             .unwrap_or_else(|err| {
@@ -138,7 +154,66 @@ impl AppState {
             preset_dir,
             preset_sig,
             last_preset_poll: start,
+            config,
+            config_path,
+            display_index,
         }
+    }
+
+    /// Persist the current config to disk if a per-user path was resolved. A
+    /// best-effort write — a failure is logged inside `Config::save`, never
+    /// fatal to the running show.
+    fn save_config(&self) {
+        if let Some(path) = &self.config_path {
+            self.config.save(path);
+        }
+    }
+
+    /// Toggle borderless-fullscreen (the `F` hotkey). Going fullscreen targets
+    /// the operator-selected display (falling back to the current/primary one);
+    /// the new state and chosen monitor name are persisted so a restart matches.
+    fn toggle_fullscreen(&mut self) {
+        if self.window.fullscreen().is_some() {
+            self.window.set_fullscreen(None);
+            self.config.output.fullscreen = false;
+        } else {
+            let monitors: Vec<MonitorHandle> = self.window.available_monitors().collect();
+            let monitor = monitors
+                .get(self.display_index)
+                .cloned()
+                .or_else(|| self.window.current_monitor())
+                .or_else(|| self.window.primary_monitor());
+            if let Some(name) = monitor.as_ref().and_then(MonitorHandle::name) {
+                self.config.output.display_name = Some(name);
+            }
+            // `Borderless(None)` means "the current monitor" — a safe fallback
+            // when we couldn't resolve a specific handle.
+            self.window
+                .set_fullscreen(Some(Fullscreen::Borderless(monitor)));
+            self.config.output.fullscreen = true;
+        }
+        self.save_config();
+        self.window.request_redraw();
+    }
+
+    /// Advance to the next display (the `D` hotkey): record it as the selected
+    /// output, and — if currently fullscreen — move the fullscreen surface onto
+    /// it immediately. Persists the new index + monitor name.
+    fn cycle_display(&mut self) {
+        let monitors: Vec<MonitorHandle> = self.window.available_monitors().collect();
+        if monitors.is_empty() {
+            return;
+        }
+        self.display_index = (self.display_index + 1) % monitors.len();
+        let monitor = monitors.get(self.display_index).cloned();
+        self.config.output.display = self.display_index;
+        self.config.output.display_name = monitor.as_ref().and_then(MonitorHandle::name);
+        if self.window.fullscreen().is_some() {
+            self.window
+                .set_fullscreen(Some(Fullscreen::Borderless(monitor)));
+        }
+        self.save_config();
+        self.window.request_redraw();
     }
 
     /// Re-scan the preset directory if the poll interval has elapsed and its
@@ -347,6 +422,8 @@ impl AppState {
                 self.renderer.set_overlay(self.overlay_on);
                 self.window.request_redraw();
             }
+            KeyCode::KeyF => self.toggle_fullscreen(),
+            KeyCode::KeyD => self.cycle_display(),
             _ => {}
         }
     }
@@ -440,19 +517,46 @@ fn start_capture() -> (
 }
 
 struct App {
+    /// Loaded once at startup; the window is created from it on `resumed` and
+    /// it is then handed to the `AppState` for live edits + persistence.
+    config: Config,
+    config_path: Option<PathBuf>,
     state: Option<AppState>,
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.state.is_none() {
-            // 1080p default: the size the NFR 1 performance floor is quoted at.
-            let attrs = Window::default_attributes()
-                .with_title(APP_TITLE)
-                .with_inner_size(winit::dpi::PhysicalSize::new(1920u32, 1080u32));
+            // Resolve the configured output display against the live monitor
+            // list, then open borderless-fullscreen on it (walking skeleton) or
+            // fall back to the windowed 1080p default — the size the NFR 1
+            // performance floor is quoted at — when unset/unmatched.
+            let monitors: Vec<MonitorHandle> = event_loop.available_monitors().collect();
+            let target = resolve_monitor(&monitors, &self.config.output);
+            let display_index = target
+                .as_ref()
+                .map_or(self.config.output.display, |(i, _)| *i);
+
+            let mut attrs = Window::default_attributes().with_title(APP_TITLE);
+            attrs = match (self.config.output.fullscreen, target) {
+                (true, Some((_, monitor))) => {
+                    attrs.with_fullscreen(Some(Fullscreen::Borderless(Some(monitor))))
+                }
+                // Fullscreen requested but no display resolved -> current monitor.
+                (true, None) => attrs.with_fullscreen(Some(Fullscreen::Borderless(None))),
+                (false, _) => {
+                    attrs.with_inner_size(winit::dpi::PhysicalSize::new(1920u32, 1080u32))
+                }
+            };
+
             match event_loop.create_window(attrs) {
                 Ok(window) => {
-                    let state = AppState::new(Arc::new(window));
+                    let state = AppState::new(
+                        Arc::new(window),
+                        std::mem::take(&mut self.config),
+                        self.config_path.take(),
+                        display_index,
+                    );
                     state.window.request_redraw();
                     self.state = Some(state);
                 }
@@ -533,6 +637,39 @@ fn resolve_preset_dir() -> PathBuf {
 /// then silently no-ops (degrade, never crash — NFR 10).
 fn resolve_log_path() -> Option<PathBuf> {
     preset_data_root().map(|root| root.join(APP_DIR_NAME).join("diagnostics.log"))
+}
+
+/// Resolve `config.toml` under the per-user app dir (same base as the presets
+/// and diagnostics log). `None` if the OS data root can't be resolved — the
+/// config then loads defaults and hotkey changes apply live but don't persist.
+fn resolve_config_path() -> Option<PathBuf> {
+    preset_data_root().map(|root| root.join(APP_DIR_NAME).join("config.toml"))
+}
+
+/// Pick the monitor for the configured output, returning its index in
+/// `monitors` and a handle. A stored *name* wins over the raw index (winit's
+/// monitor ordering isn't stable across boot/hotplug — plan Risks); an
+/// out-of-range index falls back to the first monitor. `None` only when no
+/// monitors are enumerated at all.
+fn resolve_monitor(
+    monitors: &[MonitorHandle],
+    output: &config::Output,
+) -> Option<(usize, MonitorHandle)> {
+    if monitors.is_empty() {
+        return None;
+    }
+    if let Some(name) = &output.display_name
+        && let Some((index, monitor)) = monitors
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.name().as_deref() == Some(name.as_str()))
+    {
+        return Some((index, monitor.clone()));
+    }
+    if let Some(monitor) = monitors.get(output.display) {
+        return Some((output.display, monitor.clone()));
+    }
+    monitors.first().map(|monitor| (0, monitor.clone()))
 }
 
 #[cfg(windows)]
@@ -632,7 +769,18 @@ fn warn_cap_overflow(renderer: &Renderer) {
 fn main() {
     // expect: init-time invariant — without an event loop there is no app.
     let event_loop = EventLoop::new().expect("failed to create event loop");
-    let mut app = App { state: None };
+
+    // Load the operator config before the window exists so the first frame can
+    // open on the right display; a missing/garbled file degrades to windowed
+    // defaults (NFR 10).
+    let config_path = resolve_config_path();
+    let config = config_path.as_deref().map(Config::load).unwrap_or_default();
+
+    let mut app = App {
+        config,
+        config_path,
+        state: None,
+    };
     if let Err(err) = event_loop.run_app(&mut app) {
         eprintln!("event loop error: {err}");
         std::process::exit(1);

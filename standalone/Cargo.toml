@@ -22,6 +22,11 @@ workspace = true
 lmv-core = { path = "../core", features = ["text"] }
 # Windowing (ADR-0001 fixes winit for the standalone shell).
 winit = "=0.30.13"
+# Per-user operator config (Plan 0009): derive-(de)serialize the small
+# `config.toml`. Same crates the core preset layer already uses; pinned exact
+# to the same versions per NFR 4 / the hygiene guard.
+serde = { version = "=1.0.229", features = ["derive"] }
+toml = "=1.1.3"
 
 # Dev-only image I/O for the headless-capture `shot` example (ADR-0011): encode
 # captured RGBA to PNG and tile the contact sheet. Dev-dependency scope keeps it
