@@ -1,23 +1,32 @@
 //! GPU compute-particle scenes: strange attractors (ADR-0015, Plan 0016). The
 //! engine's **first compute pipeline** — a storage buffer of particles stepped
 //! through an attractor map each frame by a compute shader, then drawn as
-//! additive point-sprites. This is idiom B of the four render idioms; the CPU
-//! [`swarm`](super::swarm) is idiom B's ~10k CPU precursor, replaced here by
-//! GPU-resident state that scales to 100k+ points with no CPU round-trip.
+//! additive point-sprites with fading trails. This is idiom B of the four render
+//! idioms; the CPU [`swarm`](super::swarm) is idiom B's ~10k CPU precursor,
+//! replaced here by GPU-resident state that scales to 100k+ points with no CPU
+//! round-trip.
 //!
-//! Phase 1 is a walking skeleton: one hardcoded 2D map (De Jong), a fixed-rate
-//! step, and a direct additive draw with no trails. Trails via the
-//! [`PingPongField`](crate::render::feedback) (Phase 2), audio-reactive named
-//! parameters (Phase 3), and the wider attractor family + selection (Phase 4)
-//! land on top. All randomness is the seeded initial scatter (NFR 6): the point
-//! cloud is a pure function of the seed and the fixed-`dt` step sequence, so a
-//! capture reproduces bit-for-bit on one adapter.
+//! Trails reuse Plan 0014's [`PingPongField`](crate::render::feedback) rather
+//! than a second feedback mechanism: each frame the previous accumulation texture
+//! is drawn back faded (decay pass), the fresh points are added on top
+//! (additive), and the result is composited to the surface (present pass). Trail
+//! persistence is the named `fade` parameter; `fade = 0` clears the accumulation
+//! each frame, reproducing the trail-free look.
+//!
+//! All randomness is the seeded initial scatter (NFR 6): the point cloud is a
+//! pure function of the seed and the fixed-`dt` step sequence, so a capture
+//! reproduces bit-for-bit on one adapter.
 //!
 //! **GPU resources are built lazily, on first render** — the same discipline the
 //! reaction-diffusion scene uses (see its module docs). `create_all` builds every
-//! scene up front, but the compute pipeline + storage buffer are constructed only
-//! when this scene is first drawn, so a capture that never activates it never
-//! builds them (keeping the other scenes' WARP captures unperturbed).
+//! scene up front, but the compute pipeline + storage buffer + trail field are
+//! constructed only when this scene is first drawn, so a capture that never
+//! activates it never builds them (keeping the other scenes' WARP captures
+//! unperturbed).
+//!
+//! The accumulation field is a fixed 16:9 offscreen, presented stretched to the
+//! surface (aspect ignored, as the reaction-diffusion present does): correct on a
+//! 16:9 display, uniformly stretched otherwise.
 
 // Hot-path panic-denial pragma (Plan 0002 Phase 2, extended to scenes by Plan
 // 0003 Phase 0). Steps + draws every displayed frame.
@@ -31,6 +40,7 @@
 
 use super::{Scene, SeededRng};
 use crate::dsp::AnalysisFrame;
+use crate::render::feedback::PingPongField;
 
 /// Particle count. GPU-resident state is ~16 bytes each, so this is ~0.8 MB of
 /// storage (negligible); the real ceiling is additive-blend fill rate at high
@@ -44,6 +54,13 @@ const WORKGROUP: u32 = 64;
 /// a few iterations regardless, so a modest starting box is enough (NFR 6).
 const INIT_SPREAD: f32 = 1.5;
 const SEED: u64 = 0x4C4D_5641_5454_5231; // "LMVATTR1"
+
+/// Fixed 16:9 accumulation grid the trails live on, decoupled from the surface
+/// size (the reaction-diffusion resolution-independence discipline). Modest so
+/// the extra decay+present fill the software capture pays stays cheap; the glow
+/// is soft, so upscaling to 1080p reads fine.
+const TRAIL_W: u32 = 640;
+const TRAIL_H: u32 = 360;
 
 /// Wall-clock duration of one attractor iteration (Plan 0014 injected `dt`). The
 /// fixed-timestep accumulator runs one compute step per `FIXED_STEP` of injected
@@ -72,6 +89,11 @@ const SPIN_RATE: f32 = 0.18;
 /// Parameter defaults — a calm idle look when nothing is bound.
 const DEFAULT_SIZE: f32 = 1.0;
 const DEFAULT_HUE: f32 = 0.0;
+/// Trail persistence: the fraction of the accumulation retained per 1/60 s frame.
+/// ~0.94 gives glowing trails that fade over ~1 s; `fade = 0` clears each frame
+/// (trail-free). Applied frame-rate-independently (raised to the `dt`-relative
+/// power), so the trail length is the same wall-clock duration on any refresh.
+const DEFAULT_FADE: f32 = 0.94;
 /// Base point half-size in world units (before the `size` multiplier), matching
 /// the swarm's small-glowing-point scale.
 const POINT_BASE: f32 = 0.006;
@@ -114,9 +136,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 "#;
 
-/// Draw pass: one additive glowing point-sprite per particle. The particle
-/// storage buffer is bound as an instance vertex buffer; the shader expands each
-/// into a screen-facing quad and tints it from the seeded per-particle offset.
+/// Draw pass: one additive glowing point-sprite per particle, into the trail
+/// field. The particle storage buffer is bound as an instance vertex buffer; the
+/// shader expands each into a screen-facing quad and tints it from the seeded
+/// per-particle offset.
 const DRAW_SHADER: &str = r#"
 struct Draw {
     // x: aspect, y: point half-size (world), z: hue offset, w: display rotation
@@ -178,6 +201,67 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Decay pass: draw the previous accumulation back into the fresh target scaled
+/// by the per-frame retention factor `k`, laying down the faded trail before the
+/// new points are added on top.
+const DECAY_SHADER: &str = r#"
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
+    var pts = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0),
+    );
+    let p = pts[vi];
+    var out: VsOut;
+    out.pos = vec4<f32>(p, 0.0, 1.0);
+    out.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
+    return out;
+}
+
+struct Decay { k: vec4<f32> } // x: per-frame retention factor
+@group(0) @binding(0) var prev: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+@group(0) @binding(2) var<uniform> decay: Decay;
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let c = textureSampleLevel(prev, samp, in.uv, 0.0).rgb * decay.k.x;
+    return vec4<f32>(c, 1.0);
+}
+"#;
+
+/// Present pass: composite the accumulation field to the surface (linear sample,
+/// stretched to fill; aspect ignored as in the reaction-diffusion present).
+const PRESENT_SHADER: &str = r#"
+struct VsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
+    var pts = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0),
+    );
+    let p = pts[vi];
+    var out: VsOut;
+    out.pos = vec4<f32>(p, 0.0, 1.0);
+    out.uv = p * 0.5 + vec2<f32>(0.5, 0.5);
+    return out;
+}
+
+@group(0) @binding(0) var field: texture_2d<f32>;
+@group(0) @binding(1) var samp: sampler;
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let c = textureSampleLevel(field, samp, in.uv, 0.0).rgb;
+    return vec4<f32>(c, 1.0);
+}
+"#;
+
 /// One particle, GPU storage-buffer layout (std430). 16 bytes: a 2D attractor
 /// position, an age counter, and a per-particle seed jitter set once at init.
 #[repr(C)]
@@ -208,15 +292,33 @@ struct DrawUniform {
     v: [f32; 4],
 }
 
+/// Decay uniform (per frame): x is the per-frame trail retention factor.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct DecayUniform {
+    k: [f32; 4],
+}
+
 /// The GPU-side state, built lazily on first render (see the module docs).
 struct Resources {
     compute_pipeline: wgpu::ComputePipeline,
     draw_pipeline: wgpu::RenderPipeline,
+    decay_pipeline: wgpu::RenderPipeline,
+    present_pipeline: wgpu::RenderPipeline,
+    /// Two-texture accumulation the trails ping-pong between (ADR-0012 reuse).
+    field: PingPongField,
     particles: wgpu::Buffer,
     step_uniform: wgpu::Buffer,
     draw_uniform: wgpu::Buffer,
+    decay_uniform: wgpu::Buffer,
     compute_bg: wgpu::BindGroup,
     draw_bg: wgpu::BindGroup,
+    /// Decay/present bind groups reading texture A / texture B — selected by the
+    /// field's read side each frame so nothing is rebuilt on the hot path.
+    decay_bg_a: wgpu::BindGroup,
+    decay_bg_b: wgpu::BindGroup,
+    present_bg_a: wgpu::BindGroup,
+    present_bg_b: wgpu::BindGroup,
 }
 
 impl Resources {
@@ -229,6 +331,16 @@ impl Resources {
             label: Some("attractor-draw-shader"),
             source: wgpu::ShaderSource::Wgsl(DRAW_SHADER.into()),
         });
+        let decay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("attractor-decay-shader"),
+            source: wgpu::ShaderSource::Wgsl(DECAY_SHADER.into()),
+        });
+        let present_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("attractor-present-shader"),
+            source: wgpu::ShaderSource::Wgsl(PRESENT_SHADER.into()),
+        });
+
+        let field = PingPongField::new(device, TRAIL_W, TRAIL_H);
 
         // Particle storage buffer: written by the compute step (STORAGE), read by
         // the draw pass as an instance vertex buffer (VERTEX), seeded once from
@@ -241,43 +353,19 @@ impl Resources {
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let step_uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("attractor-step-uniform"),
-            size: std::mem::size_of::<StepUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let draw_uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("attractor-draw-uniform"),
-            size: std::mem::size_of::<DrawUniform>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let step_uniform =
+            uniform_buffer(device, "attractor-step-uniform", size_of::<StepUniform>());
+        let draw_uniform =
+            uniform_buffer(device, "attractor-draw-uniform", size_of::<DrawUniform>());
+        let decay_uniform =
+            uniform_buffer(device, "attractor-decay-uniform", size_of::<DecayUniform>());
 
         // --- compute: read_write storage + step uniform ---
         let compute_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("attractor-compute-layout"),
             entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
+                storage_entry(0),
+                uniform_entry(1, wgpu::ShaderStages::COMPUTE),
             ],
         });
         let compute_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -309,19 +397,11 @@ impl Resources {
             cache: None,
         });
 
-        // --- draw: the particle buffer as an instance vertex buffer + uniform ---
+        // --- draw: the particle buffer as an instance vertex buffer, additively
+        // into the trail field (float target so the accumulation has headroom) ---
         let draw_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("attractor-draw-layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
+            entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
         });
         let draw_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("attractor-draw-bg"),
@@ -358,7 +438,7 @@ impl Resources {
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
+                    format: PingPongField::FORMAT,
                     // Additive: overlapping points bloom brighter (the dense look).
                     blend: Some(wgpu::BlendState {
                         color: wgpu::BlendComponent {
@@ -378,23 +458,256 @@ impl Resources {
             cache: None,
         });
 
+        // --- decay + present: fullscreen samples of the accumulation field ---
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("attractor-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let decay_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("attractor-decay-layout"),
+            entries: &[
+                texture_entry(0),
+                sampler_entry(1),
+                uniform_entry(2, wgpu::ShaderStages::FRAGMENT),
+            ],
+        });
+        let decay_bg_a = blit_bind_group(
+            device,
+            &decay_layout,
+            "attractor-decay-bg-a",
+            field.view_a(),
+            &sampler,
+            Some(&decay_uniform),
+        );
+        let decay_bg_b = blit_bind_group(
+            device,
+            &decay_layout,
+            "attractor-decay-bg-b",
+            field.view_b(),
+            &sampler,
+            Some(&decay_uniform),
+        );
+        let decay_pipeline = fullscreen_pipeline(
+            device,
+            &decay_shader,
+            &decay_layout,
+            PingPongField::FORMAT,
+            "attractor-decay",
+        );
+
+        let present_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("attractor-present-layout"),
+            entries: &[texture_entry(0), sampler_entry(1)],
+        });
+        let present_bg_a = blit_bind_group(
+            device,
+            &present_layout,
+            "attractor-present-bg-a",
+            field.view_a(),
+            &sampler,
+            None,
+        );
+        let present_bg_b = blit_bind_group(
+            device,
+            &present_layout,
+            "attractor-present-bg-b",
+            field.view_b(),
+            &sampler,
+            None,
+        );
+        let present_pipeline = fullscreen_pipeline(
+            device,
+            &present_shader,
+            &present_layout,
+            surface_format,
+            "attractor-present",
+        );
+
         Self {
             compute_pipeline,
             draw_pipeline,
+            decay_pipeline,
+            present_pipeline,
+            field,
             particles,
             step_uniform,
             draw_uniform,
+            decay_uniform,
             compute_bg,
             draw_bg,
+            decay_bg_a,
+            decay_bg_b,
+            present_bg_a,
+            present_bg_b,
+        }
+    }
+
+    /// Clear both accumulation textures to black — run once after a (re)build so
+    /// the first decay pass reads a defined (empty) trail rather than garbage.
+    fn clear_field(&self, encoder: &mut wgpu::CommandEncoder) {
+        for view in [self.field.view_a(), self.field.view_b()] {
+            encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("attractor-clear-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
         }
     }
 }
 
+fn uniform_buffer(device: &wgpu::Device, label: &str, size: usize) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: size as u64,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+fn storage_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: false },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+fn uniform_entry(binding: u32, visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+fn texture_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+fn sampler_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        count: None,
+    }
+}
+
+/// A texture(+sampler)[+uniform] bind group for the decay/present fullscreen
+/// passes. `uniform` is `Some` for decay (the retention factor) and `None` for
+/// present (no scaling).
+fn blit_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    label: &str,
+    input: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+    uniform: Option<&wgpu::Buffer>,
+) -> wgpu::BindGroup {
+    let mut entries = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(input),
+        },
+        wgpu::BindGroupEntry {
+            binding: 1,
+            resource: wgpu::BindingResource::Sampler(sampler),
+        },
+    ];
+    if let Some(buf) = uniform {
+        entries.push(wgpu::BindGroupEntry {
+            binding: 2,
+            resource: buf.as_entire_binding(),
+        });
+    }
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &entries,
+    })
+}
+
+/// A fullscreen-triangle pipeline (no vertex buffers) writing into `target`.
+fn fullscreen_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    bind_layout: &wgpu::BindGroupLayout,
+    target: wgpu::TextureFormat,
+    label: &str,
+) -> wgpu::RenderPipeline {
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(label),
+        bind_group_layouts: &[Some(bind_layout)],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: target,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 /// GPU compute-particle strange-attractor scene (ADR-0015). A storage buffer of
-/// particles is stepped through the De Jong map by a compute shader each frame
-/// and drawn as additive point-sprites. The named-parameter surface (`size`,
-/// `hue`) is ADR-0002 layer 2; the wider family + coefficient params land in
-/// later phases.
+/// particles is stepped through the De Jong map by a compute shader each frame,
+/// drawn as additive point-sprites into a fading trail field, and composited to
+/// the surface. The named-parameter surface (`size`, `hue`, `fade`) is ADR-0002
+/// layer 2; the wider family + coefficient params land in later phases.
 pub struct AttractorScene {
     /// Cloned device handle (an `Arc` inside wgpu) used to build [`Resources`]
     /// lazily on first render — see the module docs for why.
@@ -404,16 +717,21 @@ pub struct AttractorScene {
     /// The deterministic seeded scatter, uploaded on the first frame after a
     /// (re)build so a rebuilt scene restarts identically (capture determinism).
     seed_particles: Vec<Particle>,
-    needs_upload: bool,
+    /// First frame after a (re)build: upload the seed and clear the trail field.
+    needs_init: bool,
     /// Fixed-timestep accumulator: unspent injected `dt`, drained one
     /// [`FIXED_STEP`] at a time into compute steps.
     accumulator: f32,
     /// Steps `advance` scheduled for the next `render` to encode.
     pending_steps: u32,
+    /// Real elapsed seconds for this frame, injected via `advance`, used to make
+    /// the trail decay frame-rate-independent.
+    dt: f32,
     /// Shared scene clock (seconds), set by the renderer each frame.
     time: f32,
     size: f32,
     hue: f32,
+    fade: f32,
 }
 
 impl AttractorScene {
@@ -426,12 +744,14 @@ impl AttractorScene {
             surface_format,
             res: None,
             seed_particles,
-            needs_upload: true,
+            needs_init: true,
             accumulator: 0.0,
             pending_steps: 0,
+            dt: FIXED_STEP,
             time: 0.0,
             size: DEFAULT_SIZE,
             hue: DEFAULT_HUE,
+            fade: DEFAULT_FADE,
         }
     }
 
@@ -459,6 +779,7 @@ impl Scene for AttractorScene {
     }
 
     fn advance(&mut self, dt: f32) {
+        self.dt = dt;
         // Drain the accumulator one fixed step at a time, clamped so a long stall
         // can't queue unbounded compute work (the reaction-diffusion discipline).
         // The sub-`FIXED_STEP` remainder carries to the next frame.
@@ -479,12 +800,14 @@ impl Scene for AttractorScene {
     fn reset_params(&mut self) {
         self.size = DEFAULT_SIZE;
         self.hue = DEFAULT_HUE;
+        self.fade = DEFAULT_FADE;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
         match name {
             "size" => self.size = value,
             "hue" => self.hue = value,
+            "fade" => self.fade = value,
             _ => {}
         }
     }
@@ -496,7 +819,7 @@ impl Scene for AttractorScene {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
-        aspect: f32,
+        _aspect: f32,
     ) {
         if self.res.is_none() {
             self.res = Some(Resources::build(&self.device, self.surface_format));
@@ -504,21 +827,25 @@ impl Scene for AttractorScene {
         let Self {
             res,
             seed_particles,
-            needs_upload,
+            needs_init,
             pending_steps,
+            dt,
             time,
             size,
             hue,
+            fade,
             ..
         } = self;
-        let Some(res) = res.as_ref() else {
+        let Some(res) = res.as_mut() else {
             return;
         };
 
-        // One-shot deterministic seed upload on the first frame after a (re)build.
-        if *needs_upload {
+        // One-shot deterministic init on the first frame after a (re)build: seed
+        // the particles and clear the trail field so the first decay reads black.
+        if *needs_init {
             queue.write_buffer(&res.particles, 0, bytemuck::cast_slice(seed_particles));
-            *needs_upload = false;
+            res.clear_field(encoder);
+            *needs_init = false;
         }
 
         queue.write_buffer(
@@ -536,7 +863,23 @@ impl Scene for AttractorScene {
             &res.draw_uniform,
             0,
             bytemuck::bytes_of(&DrawUniform {
-                v: [aspect.max(0.1), POINT_BASE * *size, *hue, *time * SPIN_RATE],
+                v: [
+                    TRAIL_W as f32 / TRAIL_H as f32,
+                    POINT_BASE * *size,
+                    *hue,
+                    *time * SPIN_RATE,
+                ],
+            }),
+        );
+        // Frame-rate-independent trail decay: retain `fade` per 1/60 s, raised to
+        // the `dt`-relative power so the trail length is the same wall-clock
+        // duration on any refresh. `fade = 0` -> factor 0 -> trail-free.
+        let decay = fade.clamp(0.0, 1.0).powf((*dt * 60.0).max(0.0));
+        queue.write_buffer(
+            &res.decay_uniform,
+            0,
+            bytemuck::bytes_of(&DecayUniform {
+                k: [decay, 0.0, 0.0, 0.0],
             }),
         );
 
@@ -553,20 +896,57 @@ impl Scene for AttractorScene {
             pass.dispatch_workgroups(groups, 1, 1);
         }
 
-        // Draw the point cloud, additively, over a near-black bed.
+        // Trail pass: draw the faded previous accumulation into the fresh target,
+        // then add this frame's points on top. One pass, so the decay lays the
+        // bed and the additive points bloom over it. The decay reads the current
+        // read side; the present below reads the freshly-written side after swap.
+        let decay_bg = if res.field.reading_a() {
+            &res.decay_bg_a
+        } else {
+            &res.decay_bg_b
+        };
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("attractor-trail-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: res.field.write_view(),
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&res.decay_pipeline);
+            pass.set_bind_group(0, decay_bg, &[]);
+            pass.draw(0..3, 0..1);
+
+            pass.set_pipeline(&res.draw_pipeline);
+            pass.set_bind_group(0, &res.draw_bg, &[]);
+            pass.set_vertex_buffer(0, res.particles.slice(..));
+            pass.draw(0..6, 0..PARTICLE_COUNT);
+        }
+        res.field.swap();
+
+        // Present the freshly-written accumulation to the surface.
+        let present_bg = if res.field.reading_a() {
+            &res.present_bg_a
+        } else {
+            &res.present_bg_b
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("attractor-draw-pass"),
+            label: Some("attractor-present-pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.008,
-                        g: 0.006,
-                        b: 0.016,
-                        a: 1.0,
-                    }),
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -575,9 +955,8 @@ impl Scene for AttractorScene {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&res.draw_pipeline);
-        pass.set_bind_group(0, &res.draw_bg, &[]);
-        pass.set_vertex_buffer(0, res.particles.slice(..));
-        pass.draw(0..6, 0..PARTICLE_COUNT);
+        pass.set_pipeline(&res.present_pipeline);
+        pass.set_bind_group(0, present_bg, &[]);
+        pass.draw(0..3, 0..1);
     }
 }
