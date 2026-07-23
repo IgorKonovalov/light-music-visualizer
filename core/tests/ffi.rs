@@ -9,8 +9,9 @@
 use std::path::Path;
 
 use lmv_core::ffi::{
-    LMV_ABI_VERSION, LMV_DEBUG_OVERLAY, LMV_ERR_INVALID_ARG, LMV_OK, LmvMetrics, lmv_abi_version,
-    lmv_create, lmv_free, lmv_get_metrics, lmv_load_presets, lmv_render, lmv_set_debug,
+    LMV_ABI_VERSION, LMV_DEBUG_OVERLAY, LMV_ERR_INVALID_ARG, LMV_ERR_NO_WINDOW, LMV_OK, LmvMetrics,
+    lmv_abi_version, lmv_create, lmv_free, lmv_get_metrics, lmv_load_presets, lmv_render,
+    lmv_render_dt, lmv_set_debug,
 };
 
 /// Count the `.toml` files in `dir` (0 if it can't be read).
@@ -72,9 +73,42 @@ fn lmv_metrics_is_56_bytes() {
 }
 
 #[test]
-fn abi_version_is_three() {
-    assert_eq!(lmv_abi_version(), 3, "runtime ABI version is v3");
-    assert_eq!(LMV_ABI_VERSION, 3, "compile-time ABI version is v3");
+fn abi_version_is_four() {
+    assert_eq!(lmv_abi_version(), 4, "runtime ABI version is v4");
+    assert_eq!(LMV_ABI_VERSION, 4, "compile-time ABI version is v4");
+}
+
+/// v4 render entry (ADR-0013): `lmv_render_dt` takes a real `dt` and behaves
+/// exactly like `lmv_render` for a windowless handle — both drain audio and
+/// return `LMV_ERR_NO_WINDOW` (no surface attached here), and both reject a null
+/// handle without UB. This guards the added surface + the null path; the actual
+/// frame-rate-independent draw is a windowed on-device check (like the plugin's
+/// other done-whens).
+#[test]
+fn render_dt_matches_render_windowless() {
+    let handle = lmv_create(48_000, 2);
+    assert!(!handle.is_null(), "lmv_create returns a handle");
+
+    // No window attached: both entries report NO_WINDOW, never UB or panic.
+    assert_eq!(
+        unsafe { lmv_render(handle) },
+        LMV_ERR_NO_WINDOW,
+        "lmv_render (1/60 wrapper) -> no window"
+    );
+    assert_eq!(
+        unsafe { lmv_render_dt(handle, 1.0 / 144.0) },
+        LMV_ERR_NO_WINDOW,
+        "lmv_render_dt -> no window"
+    );
+
+    // Null handle is the documented invalid-arg error on the new entry too.
+    assert_eq!(
+        unsafe { lmv_render_dt(std::ptr::null_mut(), 0.016) },
+        LMV_ERR_INVALID_ARG,
+        "null handle -> invalid arg"
+    );
+
+    unsafe { lmv_free(handle) };
 }
 
 /// v3 diagnostics ABI (ADR-0008): set the overlay flag and pull a metrics
@@ -101,7 +135,7 @@ fn set_debug_and_get_metrics_over_the_abi() {
     out.struct_size = std::mem::size_of::<LmvMetrics>() as u32;
     let rc = unsafe { lmv_get_metrics(handle, &mut out) };
     assert_eq!(rc, LMV_OK, "lmv_get_metrics -> OK");
-    assert_eq!(out.abi_version, 3, "core stamps the v3 abi_version");
+    assert_eq!(out.abi_version, 4, "core stamps the current abi_version");
     assert_eq!(
         out.struct_size,
         std::mem::size_of::<LmvMetrics>() as u32,

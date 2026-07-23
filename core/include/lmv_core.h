@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define LMV_ABI_VERSION 3u
+#define LMV_ABI_VERSION 4u
 
 /* Result codes (0 success, negative failure). */
 #define LMV_OK 0
@@ -101,8 +101,19 @@ int32_t lmv_push_samples(LmvHandle *handle, const float *samples,
 int32_t lmv_attach_window(LmvHandle *handle, void *hwnd, uint32_t width,
                           uint32_t height);
 
-/* Analyze pending audio and draw one frame. Call at display cadence. */
+/* Analyze pending audio and draw one frame. Call at display cadence. Exactly
+ * equivalent to lmv_render_dt(handle, 1.0f / 60.0f) - the fixed-step wrapper for
+ * a host that has no real elapsed time to supply. */
 int32_t lmv_render(LmvHandle *handle);
+
+/*
+ * Analyze pending audio and draw one frame, advancing the simulation by
+ * dt_seconds of real time. Call at display cadence with the measured elapsed
+ * time since the previous frame, so a feedback simulation runs at the same
+ * wall-clock rate on any refresh; core never reads a clock. lmv_render is the
+ * 1/60 s wrapper over this. Added in ABI v4.
+ */
+int32_t lmv_render_dt(LmvHandle *handle, float dt_seconds);
 
 /* Notify of a window client-size change (physical pixels). */
 int32_t lmv_resize(LmvHandle *handle, uint32_t width, uint32_t height);

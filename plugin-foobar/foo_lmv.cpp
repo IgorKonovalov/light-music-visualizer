@@ -78,12 +78,19 @@ struct VizSession {
     uint16_t channels = 0;
     bool visible = true;   // is the owner host currently shown?
     UINT timer_ms = 0;     // current render-timer interval (0 = not running)
-    ULONGLONG last_log_ms = 0; // last diagnostics-log write (GetTickCount64)
+    ULONGLONG last_log_ms = 0;    // last diagnostics-log write (GetTickCount64)
+    LONGLONG last_render_qpc = 0; // QPC at the previous render (0 = first frame)
 
     void destroy_handle();
     void ensure_handle(uint32_t rate, uint16_t channels);
     void push_converted(const audio_sample *data, size_t total, unsigned channels);
     void pump();
+    // Real seconds since the previous render, for the frame-rate-independent
+    // simulation (C ABI v4 lmv_render_dt). Measured with QueryPerformanceCounter
+    // on the render thread (main-thread only); the core never reads a clock. The
+    // first frame and any long stall clamp to a small step so a hitch can't jump
+    // the simulation.
+    float measure_dt();
     // Append a diagnostics sample (lmv_get_metrics) to the plugin log at ~1 Hz.
     // Main-thread only (render timer), never the audio path. No-op pre-v3 core.
     void maybe_log_metrics();
@@ -272,6 +279,23 @@ void VizSession::push_converted(const audio_sample *data, size_t total,
     }
 }
 
+float VizSession::measure_dt() {
+    LARGE_INTEGER now;
+    LARGE_INTEGER freq;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    float dt = 1.0f / 60.0f; // first-frame fallback (matches the fixed step)
+    if (last_render_qpc != 0 && freq.QuadPart > 0) {
+        dt = static_cast<float>(static_cast<double>(now.QuadPart - last_render_qpc) /
+                                static_cast<double>(freq.QuadPart));
+        // Clamp a long stall so the simulation steps forward, never leaps.
+        if (dt > 0.25f) dt = 0.25f;
+        if (dt < 0.0f) dt = 1.0f / 60.0f;
+    }
+    last_render_qpc = now.QuadPart;
+    return dt;
+}
+
 void VizSession::pump() {
     if (stream.is_empty()) return;
     double now = 0.0;
@@ -396,7 +420,8 @@ LRESULT CALLBACK wnd_proc(HWND wnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (wp == kRenderTimer) {
                 if (g_session.owner == wnd) {
                     g_session.pump();
-                    if (g_session.handle != nullptr) lmv_render(g_session.handle);
+                    if (g_session.handle != nullptr)
+                        lmv_render_dt(g_session.handle, g_session.measure_dt());
                     g_session.maybe_log_metrics(); // ~1 Hz, gated internally
                     // Follow play/pause transitions between full and idle rate.
                     g_session.sync_render_timer();

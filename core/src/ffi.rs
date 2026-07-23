@@ -39,8 +39,8 @@ use crate::render::Renderer;
 
 /// Bump on any ABI shape change (with the accompanying ADR). v2 added
 /// `lmv_load_presets` (ADR-0006); v3 added `lmv_set_debug` + `lmv_get_metrics`
-/// and the `LmvMetrics` struct (ADR-0008).
-pub const LMV_ABI_VERSION: u32 = 3;
+/// and the `LmvMetrics` struct (ADR-0008); v4 added `lmv_render_dt` (ADR-0013).
+pub const LMV_ABI_VERSION: u32 = 4;
 
 /// Call succeeded.
 pub const LMV_OK: i32 = 0;
@@ -269,8 +269,10 @@ pub unsafe extern "C" fn lmv_attach_window(
     }
 }
 
-/// Drain pending samples through analysis and draw one frame into the
-/// attached window.
+/// Drain pending samples through analysis and draw one frame into the attached
+/// window, advancing the simulation by `dt_seconds` of real time (ADR-0013).
+/// The host measures elapsed wall-clock time between frames so the simulation is
+/// frame-rate-independent; `core` never reads a clock. Added in ABI v4.
 ///
 /// # Safety
 /// `handle` valid per `lmv_create`; render-thread role only.
@@ -279,7 +281,7 @@ pub unsafe extern "C" fn lmv_attach_window(
     clippy::indexing_slicing,
     reason = "n = pop_samples(&mut scratch) <= scratch.len(), so scratch[..n] is in range"
 )]
-pub unsafe extern "C" fn lmv_render(handle: *mut LmvHandle) -> i32 {
+pub unsafe extern "C" fn lmv_render_dt(handle: *mut LmvHandle, dt_seconds: f32) -> i32 {
     if handle.is_null() {
         return LMV_ERR_INVALID_ARG;
     }
@@ -297,15 +299,23 @@ pub unsafe extern "C" fn lmv_render(handle: *mut LmvHandle) -> i32 {
             state.analyzer.push_interleaved(&state.scratch[..n]);
         }
         let frame = state.analyzer.take_frame();
-        // Legacy fixed 1/60 s step (Plan 0014 Phase 2). ABI v4 adds
-        // `lmv_render_dt` for host-measured real time (Phase 5); this entry then
-        // becomes its exact 1/60 wrapper.
-        match renderer.render(&frame, 1.0 / 60.0) {
+        match renderer.render(&frame, dt_seconds) {
             Ok(()) => LMV_OK,
             Err(_) => LMV_ERR_RENDER,
         }
     }))
     .unwrap_or(LMV_ERR_PANIC)
+}
+
+/// Drain pending samples through analysis and draw one frame into the attached
+/// window. The exact `1/60 s` wrapper over [`lmv_render_dt`] (ADR-0013) — a host
+/// that has no real elapsed time keeps the original fixed-step behavior.
+///
+/// # Safety
+/// `handle` valid per `lmv_create`; render-thread role only.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn lmv_render(handle: *mut LmvHandle) -> i32 {
+    unsafe { lmv_render_dt(handle, 1.0 / 60.0) }
 }
 
 /// Tell the renderer the window was resized.
