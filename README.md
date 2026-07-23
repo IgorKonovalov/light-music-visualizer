@@ -66,6 +66,42 @@ docs/
 (The `core/`, `standalone/`, and `plugin-foobar/` crates are being scaffolded — the paths above
 are the target layout.)
 
+## Running the standalone app
+
+You need a recent stable **Rust** toolchain (the workspace is edition 2024 — Rust 1.85+). From
+the repo root:
+
+```sh
+cargo run -p standalone --release
+```
+
+That builds and launches `lmv`, the standalone window. **On Windows it captures whatever is
+already playing** (system audio, via WASAPI loopback) — start some music, and the visuals react.
+`--release` is recommended: this is real-time graphics, and the debug build is noticeably slower.
+
+### Controls
+
+| Key       | Action                                                      |
+|-----------|-------------------------------------------------------------|
+| `Space`   | Next preset (and restart the auto-rotate timer)             |
+| `A`       | Toggle auto-rotate on/off                                   |
+| `Tab`     | Open/close the preset browser (`↑`/`↓` navigate, `Enter` select, `Esc` close) |
+| `F`       | Toggle fullscreen                                           |
+| `D`       | Cycle to the next display/monitor                           |
+| `F3`      | Toggle the diagnostics overlay                              |
+
+### Flags & environment
+
+- `--list-devices` — enumerate audio capture devices (Windows-only).
+- `--soak [path]` — write a long-run instrumentation trace (frame-time stats) for stability
+  testing; a bare `--soak` logs to a default path under the per-user data dir.
+- `LMV_PRESET_DIR=<dir>` — point the app at a custom preset folder instead of the seeded per-user
+  directory; edits to `*.toml` there hot-reload live.
+
+> **macOS:** loopback capture is not wired up yet (macOS has no WASAPI equivalent — it needs
+> ScreenCaptureKit or a virtual device like BlackHole, a later phase). The app builds and runs,
+> but "capture any app's audio" is Windows-first today. See **Platform notes** below.
+
 ## Design principles
 
 This is real-time audio + graphics, so a few rules are non-negotiable:
