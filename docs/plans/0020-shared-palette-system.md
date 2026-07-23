@@ -1,6 +1,6 @@
 # 0020 — Shared palette system: gradient LUT, named + custom palettes, bindable color
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0021](../adrs/0021-shared-palette-system.md) (supplements [0002](../adrs/0002-layered-preset-architecture.md))
