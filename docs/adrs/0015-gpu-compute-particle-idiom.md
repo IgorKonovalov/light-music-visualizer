@@ -1,6 +1,6 @@
 # ADR-0015 — GPU compute pipelines for particle scenes; the four render-idiom catalogue
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-22
 > **Related plan(s):** [0016-gpu-compute-particle-scenes](../plans/0016-gpu-compute-particle-scenes.md)
 

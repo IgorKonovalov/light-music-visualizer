@@ -10,7 +10,6 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
 | [0015](0015-preset-dir-override-and-live-iteration.md) | Preset-directory override + live iteration (`LMV_PRESET_DIR`, shot flags) | approved | Edit one **version-controlled** `presets/*.toml` and see it live in **both** the running standalone app and the headless `shot` CLI, no rebuild. An `LMV_PRESET_DIR` env var (honored by both Rust frontends via a **single shared resolver** extracted into a `standalone` lib module) overrides the seeded `%APPDATA%` dir; the app hot-reloads it on a tightened ~150 ms poll (skipping seeding when overridden), and `shot` gets `--presets <dir>` / `--preset-file <path>` flags that beat the env var. Dependency-free (polling, **no** `notify` crate); framed as a power-user "custom preset folder" knob; consolidates Plan 0007's duplicated Rust resolver. Standalone + docs only, **C ABI untouched (v3)**; foobar plugin out of scope. [ADR-0014](../adrs/0014-preset-dir-override-for-dev-iteration.md); rejected app CLI args, symlink, `notify` watcher, duplicated resolver, core-side resolution. |
-| [0016](0016-gpu-compute-particle-scenes.md) | GPU compute-particle scenes: strange attractors | approved | The engine's first **GPU compute-particle** family and idiom B from [ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md): a compute shader steps a storage buffer of particles through a strange-attractor map (De Jong, Clifford, Thomas, 3D-projected Lorenz) each frame from injected `dt`, drawn as additive point-sprites with trails via Plan 0014's `PingPongField`. Attractor coefficients + look scalars are ADR-0002 layer-2 named params so presets bind them to bands/beat; init is `SeededRng`-seeded for determinism (NFR §6). Replaces the CPU swarm's ~10k ceiling for the dense glowing-point look; scales to 100k+ GPU-resident. **First compute pipeline in core** (the ADR's crux); rejected fragment/texture-state particles and extending the CPU swarm. Core-only, **C ABI untouched**, no new dependency. Curl-noise flow fields, fractal flames, and boids are follow-ups on the same idiom. Sequenced **after 0014** (reuses its `PingPongField` + injected-`dt` clock). |
 | [0018](0018-engine-wide-visual-enrichment.md) | Engine-wide visual enrichment: zoom, atmosphere, easing, mirrors | approved | Add four engine-wide visual controls the live smoke of the line scenes surfaced as missing: a shared **view transform** (zoom/pan), a **gradient/atmosphere background** behind every scene, frame-rate-independent **parameter easing** (band/beat motion stops feeling rigid and fast), and **mirrors** — a true line-geometry fractal replication *and* a screen-space kaleidoscope. Lands as a **fixed-order engine composite** (background → scene+view → trails → kaleidoscope → present, [ADR-0018](../adrs/0018-engine-wide-scene-compositing.md)) plus a **render-layer smoothing seam** ([ADR-0019](../adrs/0019-eased-parameters.md)), all audio-bindable as ADR-0002 named params. **Sequenced after 0014** (reuses its offscreen/present + `PingPongField` + injected `dt`); Phases 1-4 (view/background/geometry-mirror) are 0014-independent, Phases 5-7 (easing/trails/kaleidoscope) need it. Core-only, **C ABI untouched**, no new dependency. Rejected a general render graph, per-scene effects, screen-space-only mirror, a stateful `smooth()` builtin, and smoothing on the fixed 1/60 clock. |
 | [0019](0019-preset-grammar-v2.md) | Preset expression grammar v2: branching, math functions, tempo, typo warnings | approved | Grow the preset expression language so authors stop hitting walls: add math functions (`cos sqrt pow smoothstep mod`) + constants (`pi tau`), branching (six comparison operators yielding `0/1` + a `select(cond,x,y)` conditional), and two new variables — `tempo` and experimental `novelty` (plumb the already-computed `AnalysisFrame.bpm`/`novelty`, no new DSP). Fix the silent-typo footgun — an unknown parameter name becomes a surfaced load **warning** (preset still loads its good bindings), backed by each system declaring its param vocabulary. Rewrite the stale `docs/presets.md` (claims 10 presets / 2 systems; code ships 17 / 5) last. Core-only, allocation-free/panic-free per frame, **C ABI untouched**; no new DSP, no boolean ops, no ternary, no Rhai. Pre-1.0 so no backward-compat obligation (additions are incidentally non-breaking). [ADR-0020](../adrs/0020-preset-grammar-v2-branching-functions-tempo.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); from `preset-author`-lane grammar feedback. |
 | [0020](0020-shared-palette-system.md) | Shared palette system: gradient LUT, named + custom palettes, bindable color | approved | Give presets real color control. Both preset-driven scenes hardcode the **same** iq cosine palette, so a preset's only color lever is a scalar `hue` offset — fragment fields can't hold a cohesive mood and swarm color is unreachable (per-particle hue is random across the full wheel, making `hue` a visual no-op). Add one shared `core/src/render/palette.rs` that bakes a gradient (built-in **named** palette or **custom stops**) into a 256-entry LUT every scene colors through — delivered to the fragment scene as a 256x1 1D texture, sampled on CPU by the swarm — plus **fully bindable** color via layer-2 named params (`saturation`, `hue`, fragment `color_span`/`color_center`, swarm `hue_spread`/`hue_center`) and an A/B `palette_mix` crossfade for bindable palette *selection*. Default `spectrum` palette = the exact current cosine, so the 17 shipped presets are **visually unchanged** until re-authored. Adds one thin off-hot-path `Scene::set_palette` hook (second widening after ADR-0007's `configure`). Core-only, **C ABI frozen**, no new dependency; from `preset-author`-lane color feedback (commit 76a2fb4). [ADR-0021](../adrs/0021-shared-palette-system.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); rejected in-shader stop-array, cosine-coefficient params, minimal per-scene fix, bindable integer palette index, OKLab color management. **Independent of the `dt` coupling** (touches preset schema + scene shaders, not the render clock) — can land anytime. |
@@ -25,23 +24,25 @@ render clock (`Renderer::render(&frame, dt)`, `Scene::advance`, `SCENE_DT` retir
 C ABI **v4 `lmv_render_dt`**, and the `ReactionDiffusion` scene all exist for the plans below to build
 against; see Recently closed. Plan 0013's capture/visual-QA harness landed before it.)
 
-1. **[0016] GPU compute-particle scenes (attractors)** — reuses 0014's now-landed `PingPongField`
-   (trails) and injected-`dt` clock. Introduces the first compute pipeline in core
-   ([ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md)). **Approved** — ready for `dev`.
-2. **[0018] Engine-wide visual enrichment (zoom/atmosphere/easing/mirrors)** — Phases 5-7 (easing,
+1. **[0018] Engine-wide visual enrichment (zoom/atmosphere/easing/mirrors)** — Phases 5-7 (easing,
    trails, screen-space kaleidoscope) reuse 0014's now-landed injected `dt` + offscreen/present +
    `PingPongField`; Phases 1-4 (view transform, background, geometry mirror) are independent.
    Engine-wide composite + easing seam
    ([ADR-0018](../adrs/0018-engine-wide-scene-compositing.md), [ADR-0019](../adrs/0019-eased-parameters.md));
-   C ABI untouched. **Approved** — ready for `dev`. A natural companion to 0016 (both build the
-   post-0014 composite/effects layer).
-3. **[0023] Cross-preset transitions (MilkDrop-style dissolves)** — **hard-sequenced after 0018**:
+   C ABI untouched. **Approved** — ready for `dev`. A natural companion to the now-landed 0016 (both build
+   the post-0014 composite/effects layer).
+2. **[0023] Cross-preset transitions (MilkDrop-style dissolves)** — **hard-sequenced after 0018**:
    appends a two-input blend stage to 0018's engine composite (offscreen target + present + `Clear`->
    `Load` scenes) and snapshots the outgoing composited frame, so it cannot start until 0018 has landed
    that backbone. Adaptive dual-live/freeze protects the NFR §1 iGPU floor; the heaviest freeze-fallback
    trigger is 0016's attractor, so landing **after both 0016 and 0018** exercises the full matrix.
    Core-only, C ABI untouched ([ADR-0024](../adrs/0024-cross-preset-transitions.md)). **Draft** — needs
    architect/user approval before `dev`.
+
+(**[0016] GPU compute-particle scenes has now landed and closed** — the engine's first compute
+pipeline + GPU-resident particle system (four strange-attractor families, data-driven `[particles]`
+selection, trails on `PingPongField`) is available for later plans to build the effects layer on;
+see Recently closed.)
 
 (**[0010] Line-geometry scenes has now landed and closed** — the line-art category (roses,
 L-systems, Hankin stars) built on the shared `LineRenderer` is available; see Recently closed.)
@@ -77,6 +78,42 @@ lane whose color feedback (commit 76a2fb4) motivated it. Core-only, C ABI frozen
   iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0016 — GPU compute-particle scenes: strange attractors](done/0016-gpu-compute-particle-scenes.md) —
+  **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; two minor, three nits). Five
+  `dev` phase commits (`79b6cf0` skeleton, `937fdfb` trails, `9acc415` audio params, `7ec850a`
+  family set, `aa34d25` coverage guard + contract). Landed the engine's **first GPU compute
+  pipeline** (ADR-0015 idiom B, now **accepted**): a 50k-particle `wgpu` storage buffer stepped
+  through a strange-attractor map by a compute shader each frame (`STORAGE|VERTEX|COPY_DST`, read
+  back as an instance vertex buffer — no CPU round-trip) and drawn as additive point-sprites with
+  fading trails via Plan 0014's `render::feedback::PingPongField` (**no second feedback
+  mechanism**). Four families — De Jong + Clifford (2D discrete maps), Thomas + Lorenz (3D
+  continuous flows, Euler-integrated + orthographic-projected) — **selected data-driven** via an
+  optional `[particles]` table through the existing ADR-0007 `configure` hook: the shared
+  `GeneratorConfig` gained a `Particles` variant, so **no new `Scene` trait method**. All knobs
+  (`a,b,c,d,size,hue,fade,reseed`) are ADR-0002 layer-2 named params defaulting to the active
+  family's coefficients; init is `SeededRng`-seeded and the compute step reads no clock
+  (frame-rate independence via the fixed-timestep accumulator, NFR §6). Four curated presets
+  embedded (18→22). Phase 5 also **closed the Plan 0022 half-enforced-coverage followup**: a
+  `SYSTEMS`-rosters-every-variant guard in `golden.rs` (`VARIANT_COUNT` + an exhaustive
+  compile-time reminder), verified to fail when a system is dropped from the drift roster. **Core
+  only; C ABI frozen at v4; no new dependency.** Verified: `nextest 68/68` — incl. a dedicated
+  `attractor_contract` (byte-identical **seed reproducibility**, **beat perturbation**, animation,
+  De Jong + 3D-Lorenz coverage/spread), the attractor golden baseline byte-identical on WARP, and
+  preset count 22; `clippy -p lmv-core -p standalone --all-targets -D warnings` clean; `fmt` clean;
+  all four families eyeballed distinct via `shot`. **Minor:** (1) the trail field is a fixed 16:9
+  offscreen presented stretched (aspect ignored, like the reaction-diffusion present) — correct on
+  a 16:9 display, distorted otherwise; (2) the shared `GeneratorConfig` still lives in
+  `lines/mod.rs`, so `lines` now references `particles::AttractorFamily` (a future tidy could
+  relocate the enum to `scenes/mod.rs`). **Nits:** the coverage guard is compile-*nudged* not
+  airtight (`VARIANT_COUNT` is a literal; full rigor needs an enum-iteration dep, out of scope);
+  the first cycle to an attractor preset hitches once (lazy GPU-resource build, same as Plan
+  0014's cycle-to-Coral); the present pass keeps a redundant clear under a full-screen triangle.
+  **⚠ On-device carry-forwards** (non-blocking, like prior plans): 60 fps @ 1080p + low-end iGPU
+  compute/additive-fill smoke → `docs/on-device-validation.md` (ADR-0015 Risks); the four family
+  presets run hot at high energy — `preset-author`-lane tuning, not engine work. Delivers idiom B
+  of ADR-0015's four-idiom catalogue; curl-noise flow fields, fractal flames, and boids remain
+  follow-ups on the same compute path. Version **minor 0.5.0 → 0.6.0** at close.
 
 - [0022 — Decouple the golden drift guard from shipped presets (per-system frozen fixtures)](done/0022-golden-fixtures-decouple-content.md) —
   **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; one minor, one nit). Two `dev`
