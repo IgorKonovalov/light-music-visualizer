@@ -18,99 +18,15 @@ use std::path::{Path, PathBuf};
 pub use expr::{Expr, ExprError, Variables, compile};
 pub use schema::{Binding, Preset, PresetError, SystemKind};
 
-/// The shipped example presets, embedded at compile time. These are the exact
-/// files under `presets/` at the repo root, so the embedded defaults and the
-/// on-disk hot-reload source never drift.
-const EMBEDDED: [(&str, &str); 22] = [
-    (
-        "fragment_aurora.toml",
-        include_str!("../../../presets/fragment_aurora.toml"),
-    ),
-    (
-        "fragment_ember.toml",
-        include_str!("../../../presets/fragment_ember.toml"),
-    ),
-    (
-        "fragment_glacier.toml",
-        include_str!("../../../presets/fragment_glacier.toml"),
-    ),
-    (
-        "fragment_pulse.toml",
-        include_str!("../../../presets/fragment_pulse.toml"),
-    ),
-    (
-        "fragment_warp.toml",
-        include_str!("../../../presets/fragment_warp.toml"),
-    ),
-    (
-        "swarm_burst.toml",
-        include_str!("../../../presets/swarm_burst.toml"),
-    ),
-    (
-        "swarm_dense.toml",
-        include_str!("../../../presets/swarm_dense.toml"),
-    ),
-    (
-        "swarm_drift.toml",
-        include_str!("../../../presets/swarm_drift.toml"),
-    ),
-    (
-        "swarm_flow.toml",
-        include_str!("../../../presets/swarm_flow.toml"),
-    ),
-    (
-        "swarm_storm.toml",
-        include_str!("../../../presets/swarm_storm.toml"),
-    ),
-    (
-        "rose_bloom.toml",
-        include_str!("../../../presets/rose_bloom.toml"),
-    ),
-    (
-        "rose_web.toml",
-        include_str!("../../../presets/rose_web.toml"),
-    ),
-    (
-        "rose_star.toml",
-        include_str!("../../../presets/rose_star.toml"),
-    ),
-    (
-        "rose_draw.toml",
-        include_str!("../../../presets/rose_draw.toml"),
-    ),
-    (
-        "lsystem_fern.toml",
-        include_str!("../../../presets/lsystem_fern.toml"),
-    ),
-    (
-        "lsystem_arrowhead.toml",
-        include_str!("../../../presets/lsystem_arrowhead.toml"),
-    ),
-    (
-        "star_rosette.toml",
-        include_str!("../../../presets/star_rosette.toml"),
-    ),
-    (
-        "reaction_coral.toml",
-        include_str!("../../../presets/reaction_coral.toml"),
-    ),
-    (
-        "attractor_dejong.toml",
-        include_str!("../../../presets/attractor_dejong.toml"),
-    ),
-    (
-        "attractor_clifford.toml",
-        include_str!("../../../presets/attractor_clifford.toml"),
-    ),
-    (
-        "attractor_thomas.toml",
-        include_str!("../../../presets/attractor_thomas.toml"),
-    ),
-    (
-        "attractor_lorenz.toml",
-        include_str!("../../../presets/attractor_lorenz.toml"),
-    ),
-];
+// The shipped example presets, embedded at compile time so the C-ABI/foobar
+// path always has visuals without a preset directory (ADR-0006). This list is
+// **generated** — `core/build.rs` globs `presets/*.toml` and emits
+// `pub static EMBEDDED: &[(&str, &str)]` as `(filename, contents)` tuples,
+// sorted by filename, each embedded via `include_str!` (ADR-0022). Drop a
+// `.toml` in `presets/` at the repo root and rebuild — it ships, with no edit
+// here and no count to bump. (See `core/build.rs` for how the entries are
+// produced; they are not a literal array in this file.)
+include!(concat!(env!("OUT_DIR"), "/embedded_presets.rs"));
 
 /// Parse the embedded example presets. The shipped files are valid, so on the
 /// off chance one fails it is skipped rather than panicking — the caller still
@@ -136,7 +52,7 @@ pub fn default_presets() -> Vec<Preset> {
 pub fn seed_dir(dir: &Path) -> std::io::Result<usize> {
     std::fs::create_dir_all(dir)?;
     let mut written = 0;
-    for (name, contents) in EMBEDDED {
+    for &(name, contents) in EMBEDDED {
         let path = dir.join(name);
         if !path.exists() {
             std::fs::write(&path, contents)?;
@@ -200,7 +116,7 @@ mod tests {
             EMBEDDED.len(),
             "first seed writes every embedded preset"
         );
-        for (name, _) in EMBEDDED {
+        for &(name, _) in EMBEDDED {
             assert!(dir.join(name).exists(), "{name} was seeded");
         }
 

@@ -236,18 +236,28 @@ fn curve_config_parses_into_structural_config() {
 
 #[test]
 fn embedded_default_presets_all_parse() {
+    use lmv_core::preset::{EMBEDDED, Preset, default_presets};
+
     // The C-ABI / foobar path relies on these rendering without a preset dir.
-    // The count equals the curated library size, so a preset that fails to
-    // compile would drop the length below the target and fail here.
-    let presets = lmv_core::preset::default_presets();
+    // The embedded set is generated from `presets/*.toml` at build time
+    // (ADR-0022), so this assert is structural — every embedded preset parses,
+    // above a floor — never a hardcoded count that a new preset has to bump.
+    for &(name, src) in EMBEDDED {
+        assert!(
+            Preset::from_toml_str(src).is_ok(),
+            "embedded preset `{name}` should compile"
+        );
+    }
+    // A preset that failed to compile would be silently dropped by
+    // `default_presets()`, so the two lengths agreeing proves all parsed.
     assert_eq!(
-        presets.len(),
-        22,
-        "all shipped curated presets should compile"
+        default_presets().len(),
+        EMBEDDED.len(),
+        "every embedded preset compiles into the default set"
     );
     assert!(
-        presets.len() >= 8,
-        "the curated library is the ~8-14 hand-tuned set, not the 4 proof-of-concept files"
+        EMBEDDED.len() >= 8,
+        "the curated library is the hand-tuned set, not the 4 proof-of-concept files"
     );
 }
 
