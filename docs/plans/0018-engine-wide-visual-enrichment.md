@@ -1,6 +1,6 @@
 # 0018 — Engine-wide visual enrichment: zoom, atmosphere, easing, and mirrors for every scene
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0018-engine-wide-scene-compositing](../adrs/0018-engine-wide-scene-compositing.md), [0019-eased-parameters](../adrs/0019-eased-parameters.md); builds on Plan 0014 ([ADR-0012](../adrs/0012-stateful-feedback-render-system.md) `PingPongField` + [ADR-0013](../adrs/0013-c-abi-v4-render-dt.md) injected `dt`); extends [ADR-0002](../adrs/0002-layered-preset-architecture.md) layer 2
