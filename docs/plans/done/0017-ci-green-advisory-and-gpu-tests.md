@@ -2,7 +2,10 @@
 
 > **Status:** done — Phase 1 (advisory, `95bf510`) + Phase 2 (GPU-test skip, `134d4e3`),
 > both `dev`; passed Mode 4 review 2026-07-23 (no blockers, no majors, no minors; two
-> non-actionable nits). Verified: `cargo deny check` exits 0 (`advisories ok, bans ok,
+> non-actionable nits). **Post-close correction 2026-07-23 (`4bcebba`) — see the section at the
+> foot of this plan:** Phase 2's adapter-skip was scoped to the three in-crate `render::tests`
+> only; six `core/tests/` integration files calling the same constructor were missed and kept
+> `macos-latest` red after close. Verified: `cargo deny check` exits 0 (`advisories ok, bans ok,
 > licenses ok, sources ok`) with exactly one reasoned `RUSTSEC-2026-0192` ignore and the
 > corrected `[graph]` comment; all three headless-capture tests route through the shared
 > `headless_or_skip` helper (skip keyed strictly to `RenderError::RequestAdapter`, panic on
@@ -212,3 +215,37 @@ pub enum RenderError {
   `advisories.ignore` entry**. If instead the project ever decides the on-canvas text feature
   isn't worth an unmaintained dep, that is a deliberate ADR superseding ADR-0009, not a silent
   drop. This followup is the standing owner of the ignore entry's lifespan.
+
+## Post-close correction (2026-07-23, commit `4bcebba`)
+
+**The Phase 2 adapter-skip was under-scoped, and CI stayed red on `macos-latest` after this
+plan closed.** Recorded here so the close is honest — the code fix is already applied, committed,
+and pushed; no phase is reopened.
+
+**What was missed.** Phase 2's "Files touched" named only `core/src/render/mod.rs` and its
+Details spoke of exactly "the three headless-capture tests" in the in-crate `#[cfg(test)] mod
+tests` block. Those three were correctly routed through `headless_or_skip`. But
+`Renderer::new_headless(...)` is *also* called by **six `core/tests/` integration files** —
+`animation.rs`, `beat.rs`, `distinctness.rs`, `golden.rs`, `reactivity.rs`, `sanity.rs` — each
+of which kept its own `.expect("headless renderer builds on the software adapter")`. Neither the
+plan's scoping nor the Mode 4 review enumerated the other callers of the constructor (the review
+verified the three named tests but did not grep the workspace for `new_headless`), so the
+integration binaries still panicked on the adapterless macOS runner. `main` went red again on
+the next push (run 29990934038 and successors); nextest's fail-fast surfaced only `animation`
+and `beat` before cancelling, but all six shared the defect.
+
+**The fix (`4bcebba`, a `dev`-lane change applied out-of-plan to unblock red CI).** Extended the
+identical ADR-0016 shape to all six files: a `headless() -> Option<Renderer>` helper (inline
+`match` in `beat.rs`) that returns the renderer on `Ok`, prints `skipped: no GPU adapter on this
+runner (ADR-0016)` and returns `None`/`return`s on `Err(RenderError::RequestAdapter(_))`, and
+**panics on any other error**. Each test early-returns on the skip. Verified on Windows WARP: all
+six run full assertions and pass; `clippy --all-targets -D warnings` and `cargo fmt --check`
+clean. Consistent with ADR-0016's stated intent ("the pattern is reusable: any future
+headless-GPU test adopts the same match-and-skip shape") — no ADR change is needed.
+
+**Process lesson.** A skip/guard decision that keys off a shared constructor is only complete
+once *every* caller of that constructor adopts it. Both the plan (Phase 2 "Files touched") and
+the Mode 4 review should have grepped `new_headless` across the workspace, not just the module
+the failing log named. Future plans that harden a widely-called entry point must enumerate its
+call sites, and the Mode 4 alignment lens should grep for them rather than trust the plan's file
+list.
