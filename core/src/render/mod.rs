@@ -756,11 +756,12 @@ mod tests {
     // The pure roster contract, tested without a GPU surface (a live `Renderer`
     // can't be built headlessly). The `Renderer::preset_names`/`select_preset`
     // wrappers delegate to `Roster` 1:1, so this covers the addressing contract
-    // Plan 0008 Phase 2 names. Test asserts use `expect`, allowed here over the
-    // file's hot-path panic-denial pragma — test code is not the render path.
-    #![allow(clippy::expect_used, clippy::indexing_slicing)]
+    // Plan 0008 Phase 2 names. Test asserts use `expect`/`panic!`, allowed here
+    // over the file's hot-path panic-denial pragma — test code is not the render
+    // path (`headless_or_skip` panics on an unexpected build error).
+    #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
-    use super::{HeadlessOptions, Renderer, Roster};
+    use super::{HeadlessOptions, RenderError, Renderer, Roster};
     use crate::dsp::AnalysisFrame;
     use crate::preset::Preset;
 
@@ -772,6 +773,23 @@ mod tests {
 
     fn roster(names: &[&str]) -> Roster {
         Roster::new(names.iter().map(|n| preset(n)).collect())
+    }
+
+    /// Build a headless `Renderer`, or return `None` (a logged skip) when the
+    /// runner exposes no usable GPU adapter (ADR-0016). A missing adapter is an
+    /// environmental property of the CI runner — macOS has no software Metal
+    /// fallback — not a code failure, so the GPU-capture tests skip on it rather
+    /// than panic; any *other* build error still panics loudly. On Windows WARP
+    /// an adapter is always present, so the callers' assertions run in full.
+    fn headless_or_skip(opts: HeadlessOptions) -> Option<Renderer> {
+        match Renderer::new_headless(opts) {
+            Ok(r) => Some(r),
+            Err(RenderError::RequestAdapter(_)) => {
+                eprintln!("skipped: no GPU adapter on this runner (ADR-0016)");
+                None
+            }
+            Err(e) => panic!("headless renderer build failed: {e}"),
+        }
     }
 
     #[test]
@@ -811,12 +829,13 @@ mod tests {
     /// least one non-black pixel — the preset actually drew.
     #[test]
     fn headless_captures_a_non_black_frame() {
-        let mut renderer = Renderer::new_headless(HeadlessOptions {
+        let Some(mut renderer) = headless_or_skip(HeadlessOptions {
             width: 256,
             height: 256,
             prefer_software: true,
-        })
-        .expect("headless renderer builds on the software adapter");
+        }) else {
+            return;
+        };
 
         let img = renderer
             .capture_frame(&AnalysisFrame::default())
@@ -839,12 +858,13 @@ mod tests {
     /// animates), and that an unknown name is a clean error.
     #[test]
     fn capture_preset_is_deterministic_and_animates() {
-        let mut renderer = Renderer::new_headless(HeadlessOptions {
+        let Some(mut renderer) = headless_or_skip(HeadlessOptions {
             width: 128,
             height: 128,
             prefer_software: true,
-        })
-        .expect("headless renderer builds");
+        }) else {
+            return;
+        };
         let frame = AnalysisFrame::default();
 
         let a = renderer
@@ -882,12 +902,13 @@ mod tests {
     /// tracked but nothing exercised.
     #[test]
     fn oversized_lsystem_surfaces_a_cap_overflow() {
-        let mut renderer = Renderer::new_headless(HeadlessOptions {
+        let Some(mut renderer) = headless_or_skip(HeadlessOptions {
             width: 64,
             height: 64,
             prefer_software: true,
-        })
-        .expect("headless renderer builds");
+        }) else {
+            return;
+        };
 
         // F -> ten F's per iteration: depth 5 is 100k draw steps, far past the
         // 20k cap, so the build truncates and must report the drop.
