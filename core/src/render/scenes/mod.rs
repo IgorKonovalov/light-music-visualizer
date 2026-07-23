@@ -17,6 +17,7 @@
 
 pub mod fragment_field;
 pub mod lines;
+pub mod particles;
 pub mod reaction_diffusion;
 pub mod swarm;
 
@@ -108,6 +109,7 @@ pub(crate) fn create_all(
             device,
             surface_format,
         )),
+        Box::new(particles::AttractorScene::new(device, surface_format)),
     ]
 }
 

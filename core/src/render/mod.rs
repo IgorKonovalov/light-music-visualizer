@@ -60,6 +60,7 @@ fn system_slot(system: SystemKind) -> usize {
         SystemKind::LSystem => 3,
         SystemKind::StarPattern => 4,
         SystemKind::ReactionDiffusion => 5,
+        SystemKind::Attractor => 6,
     }
 }
 

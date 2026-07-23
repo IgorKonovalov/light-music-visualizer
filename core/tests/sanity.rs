@@ -38,11 +38,13 @@ fn coverage_floor(system: SystemKind) -> f32 {
         // Reaction-diffusion paints a real pattern across the frame, but the
         // present maps only the sparse V species, so the lit fraction is modest.
         SystemKind::ReactionDiffusion => 0.03,
-        // Sparse line art / point swarm: a small but real footprint.
+        // Sparse line art / point swarm / attractor cloud: a small but real
+        // footprint.
         SystemKind::Swarm
         | SystemKind::ParametricCurve
         | SystemKind::LSystem
-        | SystemKind::StarPattern => 0.01,
+        | SystemKind::StarPattern
+        | SystemKind::Attractor => 0.01,
     }
 }
 
@@ -54,6 +56,7 @@ fn system_name(system: SystemKind) -> &'static str {
         SystemKind::LSystem => "lsystem",
         SystemKind::StarPattern => "star_pattern",
         SystemKind::ReactionDiffusion => "reaction_diffusion",
+        SystemKind::Attractor => "attractor",
     }
 }
 

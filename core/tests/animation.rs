@@ -27,6 +27,7 @@ fn system_name(system: SystemKind) -> &'static str {
         SystemKind::LSystem => "lsystem",
         SystemKind::StarPattern => "star_pattern",
         SystemKind::ReactionDiffusion => "reaction_diffusion",
+        SystemKind::Attractor => "attractor",
     }
 }
 

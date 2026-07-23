@@ -1,0 +1,10 @@
+# GOLDEN FIXTURE - do not tune; editing this invalidates the drift baseline (ADR-0023)
+# Minimal GPU compute-particle attractor (De Jong) with constant params. The
+# particle init is seeded (NFR 6) and the compute step is deterministic, so a
+# constant-driven capture reproduces exactly on one adapter.
+system = "attractor"
+name   = "fixture_attractor"
+
+[params]
+size = "1.0"
+hue  = "0.3"

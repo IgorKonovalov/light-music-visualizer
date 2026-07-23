@@ -46,6 +46,7 @@ const SYSTEMS: &[SystemKind] = &[
     SystemKind::LSystem,
     SystemKind::StarPattern,
     SystemKind::ReactionDiffusion,
+    SystemKind::Attractor,
 ];
 
 /// The frozen fixture for a system: its baseline file stem (the system name) and
@@ -71,6 +72,7 @@ fn fixture(system: SystemKind) -> (&'static str, &'static str) {
             "reaction_diffusion",
             include_str!("fixtures/reaction_diffusion.toml"),
         ),
+        SystemKind::Attractor => ("attractor", include_str!("fixtures/attractor.toml")),
     }
 }
 

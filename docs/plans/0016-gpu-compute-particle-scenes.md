@@ -1,6 +1,6 @@
 # 0016 — GPU compute-particle scenes: strange attractors
 
-> **Status:** approved
+> **Status:** in-progress
 > **Created:** 2026-07-22
 > **Owner skill(s):** dev
 > **Related ADRs:** [0015-gpu-compute-particle-idiom](../adrs/0015-gpu-compute-particle-idiom.md); extends [0002-layered-preset-architecture](../adrs/0002-layered-preset-architecture.md) layer 2; reuses [0012-stateful-feedback-render-system](../adrs/0012-stateful-feedback-render-system.md)'s `PingPongField`

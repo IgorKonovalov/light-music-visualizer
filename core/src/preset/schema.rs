@@ -31,6 +31,8 @@ pub enum SystemKind {
     StarPattern,
     /// The Gray-Scott reaction-diffusion feedback scene — ADR-0012.
     ReactionDiffusion,
+    /// The GPU compute-particle strange-attractor scene — ADR-0015.
+    Attractor,
 }
 
 impl SystemKind {
@@ -42,6 +44,7 @@ impl SystemKind {
             "lsystem" => SystemKind::LSystem,
             "star_pattern" => SystemKind::StarPattern,
             "reaction_diffusion" => SystemKind::ReactionDiffusion,
+            "attractor" => SystemKind::Attractor,
             _ => return None,
         })
     }
@@ -129,8 +132,13 @@ fn build_config(
             Ok(Some(g.into_star()?))
         }
         // Reaction-diffusion drives its regime through named params (feed/kill/
-        // flow, Phase 3), not a declarative structural table.
-        SystemKind::FragmentField | SystemKind::Swarm | SystemKind::ReactionDiffusion => Ok(None),
+        // flow, Phase 3), not a declarative structural table. The attractor scene
+        // is params-only in Phase 1 (its `[particles]` family table lands in
+        // Plan 0016 Phase 4).
+        SystemKind::FragmentField
+        | SystemKind::Swarm
+        | SystemKind::ReactionDiffusion
+        | SystemKind::Attractor => Ok(None),
     }
 }
 
