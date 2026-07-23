@@ -1,6 +1,6 @@
 # 0022 — Decouple the golden drift guard from shipped presets (per-system frozen fixtures)
 
-> **Status:** draft
+> **Status:** approved — ready for `dev`; approved 2026-07-23
 > **Created:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0023](../adrs/0023-golden-drift-guard-uses-frozen-fixtures.md) (this plan's
