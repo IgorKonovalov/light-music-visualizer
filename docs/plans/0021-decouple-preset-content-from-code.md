@@ -1,6 +1,6 @@
 # 0021 — Decouple preset content from code: build-time embedding + single-source system names
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0022](../adrs/0022-build-time-preset-embedding.md)
