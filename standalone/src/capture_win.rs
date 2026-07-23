@@ -1,12 +1,14 @@
-//! WASAPI loopback capture: taps whatever the default render device is
-//! playing and feeds it to the core's sample intake.
+//! WASAPI capture: either loopback of a render device (whatever is playing) or
+//! direct capture of an input device (line-in from an audio interface), chosen
+//! from the operator config (Plan 0009 Phase 2). Feeds the core's sample intake.
 //!
-//! WASAPI loopback does not deliver reliable event-callback wakeups, so a
-//! dedicated thread polls the capture client every few milliseconds. The
-//! polling loop is this app's "audio callback" and obeys NFR section 5:
-//! after stream start it performs zero heap allocation, zero locks, zero
-//! logging, zero file I/O — it copies device buffers into the SPSC ring and
-//! sleeps.
+//! WASAPI does not deliver reliable event-callback wakeups for shared-mode
+//! capture, so a dedicated thread polls the capture client every few
+//! milliseconds. The polling loop is this app's "audio callback" and obeys NFR
+//! section 5: after stream start it performs zero heap allocation, zero locks,
+//! zero logging, zero file I/O — it copies device buffers into the SPSC ring
+//! and sleeps. Endpoint enumeration and friendly-name strings are built once at
+//! setup, *before* the real-time loop, so they never violate that discipline.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,17 +17,38 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use lmv_core::audio::{AudioFormat, SampleConsumer, SampleProducer, intake};
+use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK,
-    IAudioCaptureClient, IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX,
-    WAVEFORMATEXTENSIBLE, eConsole, eRender,
+    DEVICE_STATE_ACTIVE, EDataFlow, IAudioCaptureClient, IAudioClient, IMMDevice,
+    IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX, WAVEFORMATEXTENSIBLE, eCapture,
+    eConsole, eRender,
 };
 use windows::Win32::Media::KernelStreaming::WAVE_FORMAT_EXTENSIBLE;
 use windows::Win32::Media::Multimedia::{KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, WAVE_FORMAT_IEEE_FLOAT};
+use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
-    CoUninitialize,
+    CoUninitialize, STGM_READ,
 };
+use windows::Win32::System::Variant::VT_LPWSTR;
+
+/// Which audio path to capture. `Loopback` taps a render device (what the
+/// system plays); `LineIn` captures an input device directly (no loopback flag).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureMode {
+    Loopback,
+    LineIn,
+}
+
+/// The operator's resolved capture selection, handed to [`start`]. `device` is
+/// a friendly name to match, or `None` for the default endpoint of the mode's
+/// dataflow.
+#[derive(Debug, Clone)]
+pub struct CaptureSelector {
+    pub mode: CaptureMode,
+    pub device: Option<String>,
+}
 
 /// Ring headroom: ~340 ms at 48 kHz. Capacity is deliberately larger than the
 /// latency budget — NFR section 3 requires reading near the write head, which
@@ -94,19 +117,23 @@ impl From<windows::core::Error> for CaptureError {
     }
 }
 
-/// Start loopback capture of the default render device. Blocks until the
-/// stream is running, then returns the handle plus the consumer half of the
-/// ring. Capture stops when the handle is dropped.
-pub fn start() -> Result<(CaptureHandle, SampleConsumer), CaptureError> {
+/// Start capture for the selected mode/device. Blocks until the stream is
+/// running, then returns the handle plus the consumer half of the ring. Capture
+/// stops when the handle is dropped. A named device that isn't found falls back
+/// to the default endpoint (with a stderr note) rather than failing.
+pub fn start(selector: &CaptureSelector) -> Result<(CaptureHandle, SampleConsumer), CaptureError> {
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = Arc::clone(&stop);
+    // The selection is resolved on the capture thread (all WASAPI calls share
+    // one COM apartment there); move an owned copy across.
+    let selector = selector.clone();
     // One-shot: the capture thread reports its setup result (and the ring
     // consumer) back before entering the real-time loop.
     let (setup_tx, setup_rx) = mpsc::channel();
 
     let thread = std::thread::Builder::new()
-        .name("wasapi-loopback".into())
-        .spawn(move || capture_thread(&thread_stop, &setup_tx))
+        .name("wasapi-capture".into())
+        .spawn(move || capture_thread(&selector, &thread_stop, &setup_tx))
         .expect("spawning the capture thread is an init-time invariant");
 
     match setup_rx.recv() {
@@ -133,6 +160,114 @@ pub fn start() -> Result<(CaptureHandle, SampleConsumer), CaptureError> {
 
 type SetupResult = Result<(AudioFormat, SampleConsumer), CaptureError>;
 
+/// Resolve the endpoint to open: a `wanted` friendly name is matched among the
+/// active endpoints of `dataflow` (exact, else case-insensitive substring),
+/// falling back to the default endpoint with a stderr note if it's absent or
+/// unset. Runs at setup, before the real-time loop, so allocation/logging here
+/// is fine.
+///
+/// # Safety
+/// COM must be initialized on the calling thread; `enumerator` must be valid.
+unsafe fn pick_device(
+    enumerator: &IMMDeviceEnumerator,
+    dataflow: EDataFlow,
+    wanted: Option<&str>,
+) -> Result<IMMDevice, CaptureError> {
+    if let Some(name) = wanted.filter(|n| !n.eq_ignore_ascii_case("default")) {
+        let endpoints = unsafe { enumerate_endpoints(enumerator, dataflow)? };
+        let needle = name.to_lowercase();
+        if let Some((_, device)) = endpoints.iter().find(|(friendly, _)| {
+            friendly.eq_ignore_ascii_case(name) || friendly.to_lowercase().contains(&needle)
+        }) {
+            return Ok(device.clone());
+        }
+        eprintln!(
+            "audio device '{name}' not found among active {} endpoints; using the default",
+            flow_label(dataflow)
+        );
+    }
+    Ok(unsafe { enumerator.GetDefaultAudioEndpoint(dataflow, eConsole)? })
+}
+
+/// The active endpoints of a dataflow as (friendly name, device) pairs.
+///
+/// # Safety
+/// COM must be initialized on the calling thread; `enumerator` must be valid.
+unsafe fn enumerate_endpoints(
+    enumerator: &IMMDeviceEnumerator,
+    dataflow: EDataFlow,
+) -> Result<Vec<(String, IMMDevice)>, CaptureError> {
+    unsafe {
+        let collection = enumerator.EnumAudioEndpoints(dataflow, DEVICE_STATE_ACTIVE)?;
+        let count = collection.GetCount()?;
+        let mut out = Vec::with_capacity(count as usize);
+        for i in 0..count {
+            let device = collection.Item(i)?;
+            let name = friendly_name(&device).unwrap_or_else(|| "<unknown>".to_owned());
+            out.push((name, device));
+        }
+        Ok(out)
+    }
+}
+
+/// The `PKEY_Device_FriendlyName` of an endpoint, or `None` if the property is
+/// absent or not a wide string.
+///
+/// # Safety
+/// COM must be initialized on the calling thread; `device` must be valid.
+unsafe fn friendly_name(device: &IMMDevice) -> Option<String> {
+    unsafe {
+        let store = device.OpenPropertyStore(STGM_READ).ok()?;
+        let mut prop = store.GetValue(&PKEY_Device_FriendlyName).ok()?;
+        // Friendly name is VT_LPWSTR; read the wide string out before clearing
+        // the variant (which frees it). `vt`/`pwszVal` are Copy, so the reads
+        // don't hold a borrow across the mutating clear.
+        let vt = prop.Anonymous.Anonymous.vt;
+        let name = if vt == VT_LPWSTR {
+            prop.Anonymous.Anonymous.Anonymous.pwszVal.to_string().ok()
+        } else {
+            None
+        };
+        let _ = PropVariantClear(&mut prop);
+        name
+    }
+}
+
+fn flow_label(dataflow: EDataFlow) -> &'static str {
+    if dataflow == eCapture {
+        "capture (input)"
+    } else {
+        "render (output)"
+    }
+}
+
+/// Print the active render and capture endpoints by friendly name — the
+/// `--list-devices` startup aid (Plan 0009 Phase 2). Initializes COM on the
+/// calling thread for the enumeration and tears it down before returning.
+pub fn list_devices() -> Result<(), CaptureError> {
+    let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    com.ok()?;
+    let result = (|| unsafe {
+        let enumerator: IMMDeviceEnumerator =
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+        let render = enumerate_endpoints(&enumerator, eRender)?;
+        let capture = enumerate_endpoints(&enumerator, eCapture)?;
+        Ok::<_, CaptureError>((render, capture))
+    })();
+    unsafe { CoUninitialize() };
+
+    let (render, capture) = result?;
+    println!("Render devices (mode = \"loopback\"):");
+    for (name, _) in &render {
+        println!("  {name}");
+    }
+    println!("Capture devices (mode = \"line-in\"):");
+    for (name, _) in &capture {
+        println!("  {name}");
+    }
+    Ok(())
+}
+
 struct Stream {
     audio_client: IAudioClient,
     capture_client: IAudioCaptureClient,
@@ -142,7 +277,11 @@ struct Stream {
     channels: usize,
 }
 
-fn capture_thread(stop: &AtomicBool, setup_tx: &mpsc::Sender<SetupResult>) {
+fn capture_thread(
+    selector: &CaptureSelector,
+    stop: &AtomicBool,
+    setup_tx: &mpsc::Sender<SetupResult>,
+) {
     // COM init and all WASAPI calls stay on this one thread.
     let com = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     if let Err(e) = com.ok() {
@@ -150,7 +289,7 @@ fn capture_thread(stop: &AtomicBool, setup_tx: &mpsc::Sender<SetupResult>) {
         return;
     }
 
-    match setup_stream() {
+    match setup_stream(selector) {
         Ok((mut stream, format, consumer)) => {
             let _ = setup_tx.send(Ok((format, consumer)));
             run_capture_loop(&mut stream, stop);
@@ -166,11 +305,19 @@ fn capture_thread(stop: &AtomicBool, setup_tx: &mpsc::Sender<SetupResult>) {
     unsafe { CoUninitialize() };
 }
 
-fn setup_stream() -> Result<(Stream, AudioFormat, SampleConsumer), CaptureError> {
+fn setup_stream(
+    selector: &CaptureSelector,
+) -> Result<(Stream, AudioFormat, SampleConsumer), CaptureError> {
+    // Loopback taps a render endpoint with the loopback stream flag; line-in
+    // captures an input endpoint with no extra flags.
+    let (dataflow, stream_flags) = match selector.mode {
+        CaptureMode::Loopback => (eRender, AUDCLNT_STREAMFLAGS_LOOPBACK),
+        CaptureMode::LineIn => (eCapture, 0u32),
+    };
     unsafe {
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole)?;
+        let device = pick_device(&enumerator, dataflow, selector.device.as_deref())?;
         let audio_client: IAudioClient = device.Activate(CLSCTX_ALL, None)?;
 
         let mix_format = audio_client.GetMixFormat()?;
@@ -178,7 +325,7 @@ fn setup_stream() -> Result<(Stream, AudioFormat, SampleConsumer), CaptureError>
         let init_result = parsed.as_ref().ok().map(|_| {
             audio_client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
-                AUDCLNT_STREAMFLAGS_LOOPBACK,
+                stream_flags,
                 BUFFER_DURATION_HNS,
                 0,
                 mix_format,

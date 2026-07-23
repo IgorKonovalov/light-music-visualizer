@@ -21,6 +21,43 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct Config {
     pub output: Output,
+    pub input: Input,
+}
+
+/// `[input]` — where audio comes from: loopback of whatever is playing, or a
+/// line-in / audio-interface capture device (Plan 0009 Phase 2, Windows-first).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Input {
+    /// Loopback of a render device, or direct capture of an input device.
+    pub mode: InputMode,
+    /// Friendly device name to capture. `"default"` (or a name that matches no
+    /// active endpoint) falls back to the default endpoint of the selected
+    /// mode's dataflow.
+    pub device: String,
+}
+
+impl Default for Input {
+    fn default() -> Self {
+        // Loopback of the default render device — the pre-Plan-0009 behavior, so
+        // an existing user with no `[input]` section keeps what they had.
+        Self {
+            mode: InputMode::Loopback,
+            device: "default".to_owned(),
+        }
+    }
+}
+
+/// The capture path. Serializes as the kebab-case strings the config uses
+/// (`"loopback"` / `"line-in"`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InputMode {
+    /// Tap a render device (what the system is playing).
+    #[default]
+    Loopback,
+    /// Capture an input device (line-in from an interface).
+    LineIn,
 }
 
 /// `[output]` — which display, and whether to open borderless-fullscreen on it.

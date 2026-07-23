@@ -129,7 +129,7 @@ impl AppState {
         // shows live fps/p99 (the overlay itself stays off until F3 — Plan 0011).
         renderer.enable_diagnostics(true);
 
-        let (capture, consumer, format) = start_capture();
+        let (capture, consumer, format) = start_capture(&config.input);
         let analyzer = Analyzer::new(format)
             .expect("capture layer already validated this format at the boundary");
 
@@ -450,18 +450,29 @@ fn decode_overlay_key(code: KeyCode) -> Option<OverlayKey> {
 }
 
 #[cfg(windows)]
-fn start_capture() -> (
+fn start_capture(
+    input: &config::Input,
+) -> (
     Option<capture_handle::Handle>,
     Option<SampleConsumer>,
     AudioFormat,
 ) {
-    match capture_win::start() {
+    let selector = capture_win::CaptureSelector {
+        mode: match input.mode {
+            config::InputMode::Loopback => capture_win::CaptureMode::Loopback,
+            config::InputMode::LineIn => capture_win::CaptureMode::LineIn,
+        },
+        // "default" (or empty) means the mode's default endpoint — no name match.
+        device: (!input.device.trim().is_empty() && !input.device.eq_ignore_ascii_case("default"))
+            .then(|| input.device.clone()),
+    };
+    match capture_win::start(&selector) {
         Ok((handle, consumer)) => {
             let format = handle.format();
             (Some(handle), Some(consumer), format)
         }
         Err(err) => {
-            eprintln!("loopback capture unavailable ({err}); rendering without audio");
+            eprintln!("audio capture unavailable ({err}); rendering without audio");
             (
                 None,
                 None,
@@ -475,7 +486,9 @@ fn start_capture() -> (
 }
 
 #[cfg(target_os = "macos")]
-fn start_capture() -> (
+fn start_capture(
+    _input: &config::Input,
+) -> (
     Option<capture_handle::Handle>,
     Option<SampleConsumer>,
     AudioFormat,
@@ -500,7 +513,9 @@ fn start_capture() -> (
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
-fn start_capture() -> (
+fn start_capture(
+    _input: &config::Input,
+) -> (
     Option<capture_handle::Handle>,
     Option<SampleConsumer>,
     AudioFormat,
@@ -757,6 +772,20 @@ fn reload_presets(renderer: &mut Renderer, dir: &Path) {
     }
 }
 
+/// Print the enumerable audio devices (the `--list-devices` aid). Windows-first
+/// per the plan; other platforms note that device selection isn't wired there.
+#[cfg(windows)]
+fn list_devices_and_exit() {
+    if let Err(err) = capture_win::list_devices() {
+        eprintln!("could not list audio devices: {err}");
+    }
+}
+
+#[cfg(not(windows))]
+fn list_devices_and_exit() {
+    eprintln!("--list-devices is Windows-only (Plan 0009 Phase 2)");
+}
+
 /// Surface a line scene's segment-cap truncation to stderr (ADR-0007: the cap
 /// is never a silent cut). A no-op in the common case where the active preset's
 /// geometry fit within the cap. Called after every active-preset change.
@@ -767,6 +796,13 @@ fn warn_cap_overflow(renderer: &Renderer) {
 }
 
 fn main() {
+    // Startup aid: print the enumerable audio endpoints and exit, so the
+    // operator can copy a friendly name into `input.device` (Plan 0009 Phase 2).
+    if std::env::args().skip(1).any(|arg| arg == "--list-devices") {
+        list_devices_and_exit();
+        return;
+    }
+
     // expect: init-time invariant — without an event loop there is no app.
     let event_loop = EventLoop::new().expect("failed to create event loop");
 
