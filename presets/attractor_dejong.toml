@@ -1,17 +1,26 @@
 # De Jong - the engine's first GPU compute-particle scene (ADR-0015, Plan 0016).
 # A storage buffer of 50k particles is stepped through the De Jong strange-
 # attractor map by a compute shader each frame and drawn as additive glowing
-# points, so a dense, slowly-turning point cloud boils along the attractor's
-# fractal curves. The whole cloud rotates gently over time.
+# points with fading trails, so a dense, slowly-turning point cloud boils along
+# the attractor's fractal curves.
 #
-# Phase 1 exposes two named params (size, hue); the attractor coefficients and a
-# beat kick land in Plan 0016 Phase 3. Here bass swells the points and the hue
-# drifts slowly with time.
+# The bands steer the attractor's shape and a beat re-scatters the cloud:
+#   - bass pushes coefficient a and swells the points and the beat glow;
+#   - mid pushes coefficient b and lengthens the trails;
+#   - treble pushes coefficient c and drifts the hue;
+#   - coefficient d breathes slowly with time so the cloud never freezes;
+#   - each beat re-scatters the cloud, blooming through the trails.
 #
 # Variables available to expressions: bass mid treb onset beat bar time.
 system = "attractor"
 name = "De Jong"
 
 [params]
-size = "1.0 + clamp(bass * 3, 0, 1) * 0.9"
-hue  = "time * 0.05"
+a      = "1.641 + clamp(bass * 3, 0, 1) * 0.25"
+b      = "1.902 + clamp(mid * 3, 0, 1) * 0.25"
+c      = "0.316 + clamp(treb * 3, 0, 1) * 0.20"
+d      = "1.525 + sin(time * 0.07) * 0.15"
+size   = "1.0 + clamp(bass * 3, 0, 1) * 0.6 + beat * 0.5"
+hue    = "time * 0.05 + clamp(treb * 2, 0, 1) * 0.12"
+fade   = "0.90 + clamp(mid * 2, 0, 1) * 0.06"
+reseed = "beat"

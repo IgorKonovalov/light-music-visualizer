@@ -13,9 +13,12 @@
 //! persistence is the named `fade` parameter; `fade = 0` clears the accumulation
 //! each frame, reproducing the trail-free look.
 //!
-//! All randomness is the seeded initial scatter (NFR 6): the point cloud is a
-//! pure function of the seed and the fixed-`dt` step sequence, so a capture
-//! reproduces bit-for-bit on one adapter.
+//! Every knob is an ADR-0002 layer-2 named parameter — the attractor
+//! coefficients (`a`,`b`,`c`,`d`), look scalars (`size`,`hue`,`fade`), and a
+//! beat-driven `reseed` — so a preset steers the cloud's shape and a beat
+//! re-scatters it. All randomness is the seeded initial scatter (NFR 6): the
+//! point cloud is a pure function of the seed and the fixed-`dt` step sequence,
+//! so a capture reproduces bit-for-bit on one adapter.
 //!
 //! **GPU resources are built lazily, on first render** — the same discipline the
 //! reaction-diffusion scene uses (see its module docs). `create_all` builds every
@@ -97,6 +100,9 @@ const DEFAULT_FADE: f32 = 0.94;
 /// Base point half-size in world units (before the `size` multiplier), matching
 /// the swarm's small-glowing-point scale.
 const POINT_BASE: f32 = 0.006;
+/// `reseed` rises past this to re-scatter the cloud once (edge-triggered, so a
+/// sustained beat flag doesn't re-scatter every frame).
+const RESEED_THRESHOLD: f32 = 0.5;
 
 /// Compute step: iterate every particle through the attractor map once. Writes
 /// the storage buffer in place; the draw pass then reads it as a vertex buffer.
@@ -706,8 +712,9 @@ fn fullscreen_pipeline(
 /// GPU compute-particle strange-attractor scene (ADR-0015). A storage buffer of
 /// particles is stepped through the De Jong map by a compute shader each frame,
 /// drawn as additive point-sprites into a fading trail field, and composited to
-/// the surface. The named-parameter surface (`size`, `hue`, `fade`) is ADR-0002
-/// layer 2; the wider family + coefficient params land in later phases.
+/// the surface. Every knob is an ADR-0002 layer-2 named parameter — the attractor
+/// coefficients (`a`,`b`,`c`,`d`), the look scalars (`size`,`hue`,`fade`), and a
+/// beat-driven `reseed` — so a preset binds them to the audio bands and beat.
 pub struct AttractorScene {
     /// Cloned device handle (an `Arc` inside wgpu) used to build [`Resources`]
     /// lazily on first render — see the module docs for why.
@@ -717,8 +724,13 @@ pub struct AttractorScene {
     /// The deterministic seeded scatter, uploaded on the first frame after a
     /// (re)build so a rebuilt scene restarts identically (capture determinism).
     seed_particles: Vec<Particle>,
-    /// First frame after a (re)build: upload the seed and clear the trail field.
-    needs_init: bool,
+    /// Re-upload the seed scatter next render. Set on first build and by a
+    /// `reseed` rising edge (a beat re-scatters the cloud, blooming through the
+    /// trails). The seed is fixed, so a re-scatter stays deterministic.
+    needs_upload: bool,
+    /// Clear the trail field to black next render. Set only on first build (not on
+    /// reseed, so a beat's re-scatter blooms over the existing trails).
+    needs_clear: bool,
     /// Fixed-timestep accumulator: unspent injected `dt`, drained one
     /// [`FIXED_STEP`] at a time into compute steps.
     accumulator: f32,
@@ -729,9 +741,20 @@ pub struct AttractorScene {
     dt: f32,
     /// Shared scene clock (seconds), set by the renderer each frame.
     time: f32,
+    /// Attractor coefficients (De Jong `a`,`b`,`c`,`d`) — named params, so a
+    /// preset can steer the cloud's shape with the bands.
+    a: f32,
+    b: f32,
+    c: f32,
+    d: f32,
     size: f32,
     hue: f32,
     fade: f32,
+    /// This frame's `reseed` level (bound to a beat/onset expression); its rising
+    /// edge re-scatters the cloud.
+    reseed: f32,
+    /// Previous frame's `reseed`, for rising-edge detection.
+    prev_reseed: f32,
 }
 
 impl AttractorScene {
@@ -744,14 +767,21 @@ impl AttractorScene {
             surface_format,
             res: None,
             seed_particles,
-            needs_init: true,
+            needs_upload: true,
+            needs_clear: true,
             accumulator: 0.0,
             pending_steps: 0,
             dt: FIXED_STEP,
             time: 0.0,
+            a: DEJONG_A,
+            b: DEJONG_B,
+            c: DEJONG_C,
+            d: DEJONG_D,
             size: DEFAULT_SIZE,
             hue: DEFAULT_HUE,
             fade: DEFAULT_FADE,
+            reseed: 0.0,
+            prev_reseed: 0.0,
         }
     }
 
@@ -798,21 +828,42 @@ impl Scene for AttractorScene {
     }
 
     fn reset_params(&mut self) {
+        // Defaults are the calm De Jong look, so an unbound preset (or a param a
+        // preset leaves out) falls back here rather than leaking last frame's.
+        self.a = DEJONG_A;
+        self.b = DEJONG_B;
+        self.c = DEJONG_C;
+        self.d = DEJONG_D;
         self.size = DEFAULT_SIZE;
         self.hue = DEFAULT_HUE;
         self.fade = DEFAULT_FADE;
+        self.reseed = 0.0;
     }
 
     fn set_param(&mut self, name: &str, value: f32) {
         match name {
+            "a" => self.a = value,
+            "b" => self.b = value,
+            "c" => self.c = value,
+            "d" => self.d = value,
             "size" => self.size = value,
             "hue" => self.hue = value,
             "fade" => self.fade = value,
+            "reseed" => self.reseed = value,
             _ => {}
         }
     }
 
-    fn update(&mut self, _frame: &AnalysisFrame) {}
+    fn update(&mut self, _frame: &AnalysisFrame) {
+        // Rising-edge detect on `reseed` (a beat/onset expression): re-scatter the
+        // cloud once. Edge-triggered so a sustained flag doesn't re-scatter every
+        // frame; deterministic because the seed is fixed. The trail field is kept
+        // (only particles re-upload), so the re-scatter blooms through the trails.
+        if self.reseed >= RESEED_THRESHOLD && self.prev_reseed < RESEED_THRESHOLD {
+            self.needs_upload = true;
+        }
+        self.prev_reseed = self.reseed;
+    }
 
     fn render(
         &mut self,
@@ -827,10 +878,15 @@ impl Scene for AttractorScene {
         let Self {
             res,
             seed_particles,
-            needs_init,
+            needs_upload,
+            needs_clear,
             pending_steps,
             dt,
             time,
+            a,
+            b,
+            c,
+            d,
             size,
             hue,
             fade,
@@ -840,19 +896,24 @@ impl Scene for AttractorScene {
             return;
         };
 
-        // One-shot deterministic init on the first frame after a (re)build: seed
-        // the particles and clear the trail field so the first decay reads black.
-        if *needs_init {
-            queue.write_buffer(&res.particles, 0, bytemuck::cast_slice(seed_particles));
+        // Clear the trail field once after a (re)build so the first decay reads
+        // black rather than garbage.
+        if *needs_clear {
             res.clear_field(encoder);
-            *needs_init = false;
+            *needs_clear = false;
+        }
+        // (Re)upload the seeded scatter — on first build, and each time a `reseed`
+        // rising edge re-scatters the cloud (the trail field is kept).
+        if *needs_upload {
+            queue.write_buffer(&res.particles, 0, bytemuck::cast_slice(seed_particles));
+            *needs_upload = false;
         }
 
         queue.write_buffer(
             &res.step_uniform,
             0,
             bytemuck::bytes_of(&StepUniform {
-                coeffs: [DEJONG_A, DEJONG_B, DEJONG_C, DEJONG_D],
+                coeffs: [*a, *b, *c, *d],
                 dt: FIXED_STEP,
                 family: 0,
                 count: PARTICLE_COUNT,
