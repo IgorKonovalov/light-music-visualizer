@@ -21,6 +21,7 @@ mod background;
 pub mod capture;
 pub mod context;
 pub mod feedback;
+mod kaleidoscope;
 pub mod metrics;
 pub mod overlay;
 mod overlay_font;
@@ -36,6 +37,7 @@ use crate::preset::{Preset, SystemKind, Variables};
 use background::Background;
 pub use capture::CaptureImage;
 pub use context::{RenderContext, RenderError};
+use kaleidoscope::Kaleidoscope;
 use overlay::Overlay;
 use scenes::Scene;
 pub use scenes::lines::CapOverflow;
@@ -203,6 +205,10 @@ pub struct Renderer {
     /// a fade-and-accumulate feedback when a preset binds `trails > 0`; a passthrough
     /// (direct to the surface) otherwise.
     trails: Trails,
+    /// The screen-space kaleidoscope post-pass (ADR-0018, Phase 7): folds the
+    /// composited frame into N mirrored wedges when a preset binds
+    /// `kaleido_order >= 2`; a passthrough otherwise.
+    kaleido: Kaleidoscope,
     /// Loaded presets + the active index (pure selection state — see [`Roster`]).
     roster: Roster,
     /// Shared scene clock (seconds), advanced one fixed step per rendered frame.
@@ -237,6 +243,7 @@ impl Renderer {
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
         let background = Background::new(&ctx.device, ctx.surface_format());
         let trails = Trails::new(&ctx.device, ctx.surface_format());
+        let kaleido = Kaleidoscope::new(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
@@ -245,6 +252,7 @@ impl Renderer {
             scenes,
             background,
             trails,
+            kaleido,
             roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
@@ -269,6 +277,7 @@ impl Renderer {
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
         let background = Background::new(&ctx.device, ctx.surface_format());
         let trails = Trails::new(&ctx.device, ctx.surface_format());
+        let kaleido = Kaleidoscope::new(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
@@ -277,6 +286,7 @@ impl Renderer {
             scenes,
             background,
             trails,
+            kaleido,
             roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
@@ -316,6 +326,7 @@ impl Renderer {
         let scenes = crate::render::scenes::create_all(&ctx.device, ctx.surface_format());
         let background = Background::new(&ctx.device, ctx.surface_format());
         let trails = Trails::new(&ctx.device, ctx.surface_format());
+        let kaleido = Kaleidoscope::new(&ctx.device, ctx.surface_format());
         let overlay = Overlay::new(&ctx.device, ctx.surface_format());
         #[cfg(feature = "text")]
         let text_layer = TextLayer::new(&ctx.device, &ctx.queue, ctx.surface_format());
@@ -324,6 +335,7 @@ impl Renderer {
             scenes,
             background,
             trails,
+            kaleido,
             roster: Roster::new(crate::preset::default_presets()),
             time: 0.0,
             diag: Diag::new(),
@@ -556,6 +568,7 @@ impl Renderer {
             scenes,
             background,
             trails,
+            kaleido,
             roster,
             time,
             diag,
@@ -588,6 +601,7 @@ impl Renderer {
         scene.advance(dt);
         background.reset_params();
         trails.reset_params();
+        kaleido.reset_params();
         scene.reset_params();
         for (index, binding) in preset.params.iter().enumerate() {
             let raw = binding.expr.eval(&vars);
@@ -597,41 +611,64 @@ impl Renderer {
             // above stays pure and allocation-free.
             let tau = preset.smoothing.get(&binding.name).copied().unwrap_or(0.0);
             let value = param_smoother.smooth(index, raw, tau, dt);
-            // Route `bg_*` to the background pass and `trails` to the feedback
-            // stage; everything else to the scene. The namespaces are disjoint, so
-            // no param reaches more than one.
+            // Route `bg_*` to the background, `trails` to the feedback stage, and
+            // `kaleido_*` to the fold; everything else to the scene. The namespaces
+            // are disjoint, so no param reaches more than one.
             if !background.set_param(&binding.name, value)
                 && !trails.set_param(&binding.name, value)
+                && !kaleido.set_param(&binding.name, value)
             {
                 scene.set_param(&binding.name, value);
             }
         }
         scene.update(frame);
 
-        // Fixed-order composite (ADR-0018): background (owns the clear) -> scene,
-        // rendered into the trails offscreen when trails are active, else straight
-        // to the surface. When active, the feedback stage folds the composite into
-        // its accumulation and presents to the surface.
+        // Fixed-order composite (ADR-0018): background (owns the clear) -> scene ->
+        // feedback trails -> screen-space kaleidoscope -> present. Each post-effect
+        // is skippable; the composite renders straight to the surface when neither
+        // is active (passthrough), else into an offscreen the chain folds down to
+        // the surface. Both post stages run at their fixed 16:9 internal resolution.
         let surface_aspect = width as f32 / height.max(1) as f32;
         let trailing = trails.active();
-        let (target, target_aspect) = if trailing {
+        let kaleidoing = kaleido.active();
+
+        // Where background + scene render: the first active post-stage's input, or
+        // the surface when no post-stage is active.
+        let (scene_target, scene_aspect) = if trailing {
             match trails.begin(encoder) {
-                // The composite runs at the trails' fixed 16:9 internal resolution.
-                Some(offscreen) => (offscreen, Trails::aspect()),
+                Some(v) => (v, Trails::aspect()),
+                None => (view, surface_aspect),
+            }
+        } else if kaleidoing {
+            match kaleido.begin(encoder) {
+                Some(v) => (v, Kaleidoscope::aspect()),
                 None => (view, surface_aspect),
             }
         } else {
             (view, surface_aspect)
         };
-        background.render(&ctx.queue, encoder, target);
-        scene.render(&ctx.queue, encoder, target, target_aspect);
+        background.render(&ctx.queue, encoder, scene_target);
+        scene.render(&ctx.queue, encoder, scene_target, scene_aspect);
+
+        // Trails folds its input into the kaleidoscope's input (if the fold is
+        // active) or the surface.
         if trailing {
-            trails.resolve(&ctx.queue, encoder, view);
+            let trails_out = if kaleidoing {
+                kaleido.begin(encoder).unwrap_or(view)
+            } else {
+                view
+            };
+            trails.resolve(&ctx.queue, encoder, trails_out);
+        }
+        // The kaleidoscope folds its input (the trails output, or bg+scene) into
+        // the surface.
+        if kaleidoing {
+            kaleido.resolve(&ctx.queue, encoder, view);
         }
 
-        // Background + scene (+ the trails feedback/present pair when active), plus
-        // the optional text and overlay passes below.
-        let mut draw_calls = if trailing { 4u32 } else { 2u32 };
+        // Background + scene, plus the trails (2) and kaleidoscope (1) post passes
+        // when active, plus the optional text and overlay passes below.
+        let mut draw_calls = 2 + if trailing { 2 } else { 0 } + if kaleidoing { 1 } else { 0 };
 
         // On-canvas text (browse overlay / HUD): a second pass that loads the
         // scene and composites the queued runs on top, in the same frame
@@ -742,6 +779,7 @@ impl Renderer {
         self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
         self.background.reset_resources();
         self.trails.reset_resources();
+        self.kaleido.reset_resources();
         self.time = 0.0;
         // The rebuilt scenes are fresh — re-apply the active preset's structural
         // config (ADR-0007) so a line scene captures with its geometry built.
@@ -811,6 +849,7 @@ impl Renderer {
         self.scenes = scenes::create_all(&self.ctx.device, self.ctx.surface_format());
         self.background.reset_resources();
         self.trails.reset_resources();
+        self.kaleido.reset_resources();
         self.time = 0.0;
         self.configure_active_scene();
 

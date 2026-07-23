@@ -1,0 +1,16 @@
+# Kaleido Field - a domain-warped fragment field folded into an eight-fold
+# mirrored kaleidoscope that slowly rotates (Plan 0018 Phase 7 / ADR-0018). The
+# screen-space fold works on any scene; here the flowing field makes the wedges
+# churn. The bass widens the warp, treble drifts the hue, and the fold angle
+# turns on the clock.
+system = "fragment_field"
+name   = "Kaleido Field"
+
+[params]
+warp          = "0.5 + bass * 0.5"
+hue           = "0.5 + time * 0.02 + treb * 0.2"
+zoom          = "1.15"
+glow          = "0.85"
+flash         = "beat * 0.4"
+kaleido_order = "8"
+kaleido_angle = "time * 0.15"
