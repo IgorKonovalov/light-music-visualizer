@@ -1,9 +1,37 @@
 # 0009 — Live performance features (standalone)
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-21
+> **Closed:** 2026-07-23
 > **Owner skill(s):** dev, human
 > **Related ADRs:** none (standalone-only; the C ABI stays frozen — see Decision)
+>
+> **Close summary (Mode 4, fresh session).** Passed review — no blockers, no majors;
+> two minor deviations, both pre-flagged and sound. Five `dev` phase commits
+> (`6e048d0` config + fullscreen, `3891272` line-in capture, `bb9a1e2` scene
+> director, `d693c69` track-change novelty, `d49f377` `--soak`). Delivered the
+> live-show set in the standalone plus **one deterministic scalar** on the native
+> `AnalysisFrame` (`novelty`) — **C ABI untouched (still v3)**, no ADR. Verified:
+> `cargo test -p lmv-core` green (18 lib+integration incl. `novelty_spikes_at_a_
+> spectral_boundary` and the determinism test extended to `novelty` bits); 11
+> `director` unit tests green (rotation timing/bias, drop/novelty-before-min holds,
+> steady-never-rotates-on-novelty, disabled-nudge, inverted-dwell clamp);
+> `cargo clippy -p lmv-core -p standalone --all-targets -D warnings` clean;
+> hygiene guard covers `dsp/novelty.rs` (recursive `dsp/` scan + pragma present);
+> `ffi.rs`/`ffi` tests zero-diff, `LMV_ABI_VERSION` stays 3. **Minor (reconciled):**
+> (1) `config.rs` was edited in Phase 2 though its file list omitted it — the
+> `[input]` schema was a genuine prerequisite of the phase behavior (flagged in the
+> commit body). (2) Novelty is **spectral-only**, not the plan's "spectral/tempo" —
+> a deliberate narrowing (a beatmatched set holds tempo across the blend, so a tempo
+> term would fire on exactly the case the nudge must stay soft on; rationale in
+> `novelty.rs`), fully satisfying the distinct-spectra done-when. **Carry-forwards
+> (on-device, non-blocking, like prior plans):** Phase 6 (≥4-hour projector-rig
+> soak, human); Phase 1 multi-monitor fullscreen + `F`/`D` + persistence + config-
+> delete fallback; Phase 2 line-in reactivity with an interface connected
+> (loopback + `--list-devices` smoke-verified live); auto-rotate "feel" tuning
+> (`NOVELTY_REF`, dwell/drop constants intentionally in code/config for on-rig
+> calibration). Version: **minor bump 0.3.1 → 0.4.0** at close (the mid-plan patch
+> `c919089` was the wrong level for a feature plan / plausibly Plan 0017's).
 
 ## TL;DR
 

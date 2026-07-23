@@ -3,16 +3,16 @@
 The one-minute "what's in flight" view. Read this first each session instead of
 re-deriving state from `git log`. Completed plans move to `done/`.
 
-**Next free number: 0019**
+**Next free number: 0020**
 
 ## Active roster
 
 | Plan | Title                                   | Status | Summary |
 |------|-----------------------------------------|--------|---------|
-| [0009](0009-live-performance-features.md) | Live performance features (standalone) | approved | Drive a live DJ show onto a projector from the standalone: borderless-fullscreen on a chosen display, line-in / audio-interface capture (alongside loopback), self-rotating scenes (energy/drop-biased) with a manual hotkey override, experimental track-change detection (core DSP nudge), and a ≥4-hour instrumented soak. Operator choices persist in a per-user `config.toml`. Standalone-only via the native Rust API + one deterministic DSP field in core; C ABI frozen, no ADR. MIDI deferred. Roadmap item 2 (NFR §10). |
 | [0015](0015-preset-dir-override-and-live-iteration.md) | Preset-directory override + live iteration (`LMV_PRESET_DIR`, shot flags) | approved | Edit one **version-controlled** `presets/*.toml` and see it live in **both** the running standalone app and the headless `shot` CLI, no rebuild. An `LMV_PRESET_DIR` env var (honored by both Rust frontends via a **single shared resolver** extracted into a `standalone` lib module) overrides the seeded `%APPDATA%` dir; the app hot-reloads it on a tightened ~150 ms poll (skipping seeding when overridden), and `shot` gets `--presets <dir>` / `--preset-file <path>` flags that beat the env var. Dependency-free (polling, **no** `notify` crate); framed as a power-user "custom preset folder" knob; consolidates Plan 0007's duplicated Rust resolver. Standalone + docs only, **C ABI untouched (v3)**; foobar plugin out of scope. [ADR-0014](../adrs/0014-preset-dir-override-for-dev-iteration.md); rejected app CLI args, symlink, `notify` watcher, duplicated resolver, core-side resolution. |
 | [0016](0016-gpu-compute-particle-scenes.md) | GPU compute-particle scenes: strange attractors | approved | The engine's first **GPU compute-particle** family and idiom B from [ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md): a compute shader steps a storage buffer of particles through a strange-attractor map (De Jong, Clifford, Thomas, 3D-projected Lorenz) each frame from injected `dt`, drawn as additive point-sprites with trails via Plan 0014's `PingPongField`. Attractor coefficients + look scalars are ADR-0002 layer-2 named params so presets bind them to bands/beat; init is `SeededRng`-seeded for determinism (NFR §6). Replaces the CPU swarm's ~10k ceiling for the dense glowing-point look; scales to 100k+ GPU-resident. **First compute pipeline in core** (the ADR's crux); rejected fragment/texture-state particles and extending the CPU swarm. Core-only, **C ABI untouched**, no new dependency. Curl-noise flow fields, fractal flames, and boids are follow-ups on the same idiom. Sequenced **after 0014** (reuses its `PingPongField` + injected-`dt` clock). |
 | [0018](0018-engine-wide-visual-enrichment.md) | Engine-wide visual enrichment: zoom, atmosphere, easing, mirrors | approved | Add four engine-wide visual controls the live smoke of the line scenes surfaced as missing: a shared **view transform** (zoom/pan), a **gradient/atmosphere background** behind every scene, frame-rate-independent **parameter easing** (band/beat motion stops feeling rigid and fast), and **mirrors** — a true line-geometry fractal replication *and* a screen-space kaleidoscope. Lands as a **fixed-order engine composite** (background → scene+view → trails → kaleidoscope → present, [ADR-0018](../adrs/0018-engine-wide-scene-compositing.md)) plus a **render-layer smoothing seam** ([ADR-0019](../adrs/0019-eased-parameters.md)), all audio-bindable as ADR-0002 named params. **Sequenced after 0014** (reuses its offscreen/present + `PingPongField` + injected `dt`); Phases 1-4 (view/background/geometry-mirror) are 0014-independent, Phases 5-7 (easing/trails/kaleidoscope) need it. Core-only, **C ABI untouched**, no new dependency. Rejected a general render graph, per-scene effects, screen-space-only mirror, a stateful `smooth()` builtin, and smoothing on the fixed 1/60 clock. |
+| [0019](0019-preset-grammar-v2.md) | Preset expression grammar v2: branching, math functions, tempo, typo warnings | draft | Grow the preset expression language so authors stop hitting walls: add math functions (`cos sqrt pow smoothstep mod`) + constants (`pi tau`), branching (six comparison operators yielding `0/1` + a `select(cond,x,y)` conditional), and a `tempo` variable (plumb the already-computed `AnalysisFrame.bpm`, no new DSP). Fix the silent-typo footgun — an unknown parameter name becomes a surfaced load **warning** (preset still loads its good bindings), backed by each system declaring its param vocabulary. Rewrite the stale `docs/presets.md` (claims 10 presets / 2 systems; code ships 17 / 5) last. Core-only, allocation-free/panic-free per frame, **C ABI untouched**; no new DSP, no boolean ops, no ternary, no Rhai. Pre-1.0 so no backward-compat obligation (additions are incidentally non-breaking). [ADR-0020](../adrs/0020-preset-grammar-v2-branching-functions-tempo.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); from `preset-author`-lane grammar feedback. |
 | [0014](0014-reaction-diffusion-feedback-scene.md) | Reaction-diffusion feedback scene + frame-rate-independent render clock | approved | The engine's first **stateful feedback** scene: a Gray-Scott reaction-diffusion simulation (evolving nested contours / cellular tissue / hatched restructuring maze) on a new reusable `render::feedback::PingPongField` (two offscreen `Rgba16Float` textures swapped each sub-step, fixed internal grid, present pass composites to the surface). Driven by a **fixed-timestep accumulator fed by real injected `dt`** so it looks identical on any device over wall-clock time — the core stays clock-free (Plan 0013 capture feeds a fixed `dt` for reproducibility). Delivering `dt` at the render seam (`Renderer::render(&frame, dt)`) lets us **converge the shared scene clock globally and retire `SCENE_DT`**, making every existing scene frame-rate-independent (resolves the standing SCENE_DT wish). Audio drives it via existing named params (ADR-0002 layer 2): bands modulate feed/kill/flow, beats stamp seeds. Adds C ABI **v4 `lmv_render_dt`** ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md), additive; `lmv_render` becomes the 1/60 wrapper) so the foobar plugin gets parity. New feedback render system per [ADR-0012](../adrs/0012-stateful-feedback-render-system.md); rejected warp-feedback advection, engine-managed multi-pass, per-frame stepping. Core + both frontends. Cross-plan dep: 0013's capture must thread a fixed `dt`. |
 
 ## Recommended execution sequence
@@ -28,14 +28,11 @@ animation/sanity/beat/golden suite exist for the scene plans below to build agai
    0013's now-landed `capture_preset`/`capture_audio` to pass a fixed `dt`, so the change lives in
    one plan. Adds C ABI v4 ([ADR-0013](../adrs/0013-c-abi-v4-render-dt.md)). *Approved — its scope
    should update 0013's capture primitives to the injected `dt` before dev starts either plan.*
-2. **[0009] Live performance features** — largest, standalone, independent (C ABI frozen). This is
-   Roadmap item 2 — bring it forward if the live-show milestone outranks the scene/tooling cluster
-   (user's call; the ordering above is tactical, not a re-prioritization of the roadmap).
-3. **[0016] GPU compute-particle scenes (attractors)** — sequenced **after 0014**: it reuses 0014's
+2. **[0016] GPU compute-particle scenes (attractors)** — sequenced **after 0014**: it reuses 0014's
    `PingPongField` (trails) and injected-`dt` clock, so 0014 must land first. Introduces the first
-   compute pipeline in core ([ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md)); independent of
-   0009 otherwise. **Approved** — ready for `dev` once 0014 has landed.
-4. **[0018] Engine-wide visual enrichment (zoom/atmosphere/easing/mirrors)** — also sequenced
+   compute pipeline in core ([ADR-0015](../adrs/0015-gpu-compute-particle-idiom.md)). **Approved** —
+   ready for `dev` once 0014 has landed.
+3. **[0018] Engine-wide visual enrichment (zoom/atmosphere/easing/mirrors)** — also sequenced
    **after 0014**: Phases 5-7 (easing, trails, screen-space kaleidoscope) reuse 0014's injected
    `dt` + offscreen/present + `PingPongField`, though Phases 1-4 (view transform, background,
    geometry mirror) are 0014-independent. Engine-wide composite + easing seam
@@ -52,6 +49,13 @@ scene plans (0010/0014): the shared-preset iteration loop it adds — edit `pres
 live in the app and `shot` — is exactly how a developer/agent will tune the new curves and feedback
 presets those plans introduce, so doing it **before or alongside** 0010/0014 pays for itself.
 
+**[0019] Preset grammar v2** is likewise **independent of the `dt` coupling** (it touches `preset/expr.rs`
++ `schema.rs` + the load path, not the render clock or any scene), so it can land anytime. It's a natural
+companion to **[0015]** and the `preset-author` lane: 0015 gives the fast edit loop, 0019 widens what a
+preset can express (real `cos`, easing, `tempo`, threshold `select`) and stops the silent-typo footgun —
+so pairing them sharpens preset authoring end to end. Small, core-only, C ABI frozen. Still `draft` —
+needs the user's approval before `dev`.
+
 ## Standing (not a plan)
 
 - **[On-device validation — low-end Windows iGPU smoke](../on-device-validation.md)** — a
@@ -62,6 +66,37 @@ presets those plans introduce, so doing it **before or alongside** 0010/0014 pay
   iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0009 — Live performance features (standalone)](done/0009-live-performance-features.md) —
+  **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; two minor deviations, both
+  pre-flagged and reconciled). Five `dev` phase commits (`6e048d0` per-user config + borderless-
+  fullscreen on a chosen display, `3891272` line-in / audio-interface capture selection, `bb9a1e2`
+  drop-biased scene director + hotkeys, `d693c69` experimental track-change novelty nudge, `d49f377`
+  `--soak` long-run instrumentation). Made the standalone drive a live DJ show: `Fullscreen::
+  Borderless` on the config-selected display (`F`/`D` hotkeys, name-over-index monitor match),
+  WASAPI **capture**-endpoint enumeration for line-in alongside loopback (`--list-devices`, graceful
+  default fallback), a clock-free **`director`** module (MilkDrop-style dwell timer, drop bias, `A`
+  toggle, manual `Space`, all a pure function of injected `dt` + `AnalysisFrame`), and a coarse soak
+  sampler (elapsed/fps/RSS/heartbeat every 5 s, off the per-frame path). Core gained **one
+  deterministic scalar** — `AnalysisFrame.novelty` from a new `dsp/novelty.rs` (normalized spectral
+  distance from a slow running mean; pure, seeded, hot-path pragma) — consumed via the native API as
+  a director *nudge* that never triggers alone. Operator choices persist in a per-user `config.toml`.
+  **C ABI untouched (still v3), no ADR** (standalone-only; ADR-0001 layering applied). Verified:
+  `cargo test -p lmv-core` green (incl. `novelty_spikes_at_a_spectral_boundary` + determinism
+  extended to `novelty` bits); 11 `director` unit tests green (timing/bias, drop/novelty-before-min
+  holds, steady-never-rotates-on-novelty, disabled-nudge, inverted-dwell clamp); `cargo clippy
+  -p lmv-core -p standalone --all-targets -D warnings` clean; hygiene guard covers `dsp/novelty.rs`
+  (recursive `dsp/` scan + pragma); `ffi.rs`/`ffi` tests zero-diff. **Minor (reconciled):** (1)
+  `config.rs` edited in Phase 2 though its file list omitted it — the `[input]` schema was a genuine
+  prerequisite (flagged in the commit body); (2) novelty is **spectral-only**, not the plan's
+  "spectral/tempo" — a deliberate narrowing (a beatmatched set holds tempo across the blend, so a
+  tempo term would fire on exactly the case the nudge must stay soft on; rationale in `novelty.rs`),
+  fully satisfying the distinct-spectra done-when. **⚠ Carry-forwards (on-device, non-blocking, like
+  prior plans):** Phase 6 (≥4-hour projector-rig soak, human); Phase 1 multi-monitor fullscreen +
+  `F`/`D` + persistence-across-restart + config-delete fallback; Phase 2 line-in reactivity with an
+  interface connected (loopback + `--list-devices` smoke-verified live); auto-rotate "feel" tuning
+  (`NOVELTY_REF`, dwell/drop constants intentionally in code/config for on-rig calibration).
+  Delivers roadmap item 2 (live performance features). Version **minor 0.3.1 → 0.4.0** at close.
 
 - [0017 — Green CI: reasoned ttf-parser advisory ignore + adapter-skip for headless GPU tests](done/0017-ci-green-advisory-and-gpu-tests.md) —
   **done 2026-07-23**, passed Mode 4 review (no blockers, no majors, no minors; two non-actionable
@@ -346,6 +381,11 @@ Execution order after Plan 0001, per the NFR interviews ([docs/nfr.md](../nfr.md
 2. **Live performance features** — line-in/audio-interface capture, scene triggers
    (auto-rotate + hotkey/MIDI + experimental track-change detection), fullscreen on a
    chosen display/projector, 4-hour soak stability (NFR §10).
+   **Delivered by [Plan 0009](done/0009-live-performance-features.md)** (standalone borderless-
+   fullscreen on a chosen display, line-in capture selection, drop-biased scene director +
+   hotkeys, spectral track-change novelty nudge on the native `Frame`, `--soak` instrumentation;
+   C ABI frozen). **MIDI triggers and the ≥4-hour projector-rig soak run remain** — MIDI is its
+   own ADR-backed follow-up; the soak run is a `human` on-device carry-forward.
 3. **Adaptive quality + runtime-memory trim** — quality tiers + frame-time governor for the
    60 fps iGPU floor (NFR §1), plus cutting the standalone's ~200 MB working set (NFR §12).
    The memory trim's primary lever — compiling wgpu with only the per-OS backend feature
