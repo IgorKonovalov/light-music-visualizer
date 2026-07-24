@@ -24,6 +24,14 @@ const DROP_FRACTION: f32 = 0.35;
 /// noise (baseline ~0) never looks like a drop.
 const DROP_FLOOR: f32 = 0.05;
 
+/// How far past the min dwell (as a fraction of the min->max span) the drop bias
+/// is gated: an energy drop can only rotate early once the dwell reaches
+/// `min + DROP_GATE_FRACTION * (max - min)`. This softens the drop trigger
+/// (ADR-0027) so a drop shortly after a rotation can't rapid-fire another; the
+/// timer and novelty triggers are unaffected. At the 20/90 default that gate is
+/// ~37.5 s. Scaling to the span keeps it sensible for custom dwell configs too.
+const DROP_GATE_FRACTION: f32 = 0.25;
+
 /// Novelty score (from the core detector's ~sqrt(2)-at-a-swap scale) that earns
 /// a *full* nudge — pulling the steady-passage cap all the way to the min dwell.
 /// A tuning constant; the on-rig soak (Phase 6) is where it gets calibrated.
@@ -134,8 +142,13 @@ impl Director {
             self.dwell = 0.0;
             return Some(reason);
         }
-        // Drop bias: past the min dwell, a large downward shift rotates early.
+        // Drop bias (softened, ADR-0027): a large downward shift rotates early,
+        // but only once the dwell is well past the min dwell — gated by
+        // DROP_GATE_FRACTION of the min->max span — so a drop just after a
+        // rotation can't rapid-fire another.
+        let drop_gate = self.min_dwell + DROP_GATE_FRACTION * (self.max_dwell - self.min_dwell);
         let dropped = was_warm
+            && self.dwell >= drop_gate
             && prev_baseline > DROP_FLOOR
             && energy < prev_baseline * (1.0 - DROP_FRACTION);
         if dropped {
@@ -202,45 +215,61 @@ mod tests {
 
     #[test]
     fn steady_passage_rotates_at_max_dwell() {
-        let mut d = director(true, 8, 40);
+        let mut d = director(true, 20, 90);
         let steady = frame(1.5);
-        // No rotation for the first 39 seconds of a steady, high-energy passage.
-        for step in 1..40 {
+        // No rotation for the first 89 seconds of a steady, high-energy passage.
+        for step in 1..90 {
             assert_eq!(d.advance(1.0, &steady), None, "rotated early at {step}s");
         }
-        // The 40th second hits the max-dwell cap.
+        // The 90th second hits the max-dwell cap.
         assert_eq!(d.advance(1.0, &steady), Some(Rotation::AutoTimer));
     }
 
     #[test]
     fn energy_drop_rotates_earlier_than_the_cap() {
-        let mut d = director(true, 8, 40);
+        let mut d = director(true, 20, 90);
         let loud = frame(1.5);
-        // Warm the baseline high and pass the min dwell (steady -> no rotation).
-        for _ in 0..12 {
+        // Warm the baseline high and pass the softened drop gate (~37.5 s at the
+        // 20/90 default) with a steady passage -> no rotation yet.
+        for _ in 0..40 {
             assert_eq!(d.advance(1.0, &loud), None);
         }
-        // A sharp drop, now past the min dwell, rotates well before the 40 s cap.
+        // A sharp drop, now past the drop gate, rotates well before the 90 s cap.
         assert_eq!(d.advance(1.0, &frame(0.1)), Some(Rotation::AutoDrop));
     }
 
     #[test]
     fn drop_before_min_dwell_holds() {
-        let mut d = director(true, 8, 40);
+        let mut d = director(true, 20, 90);
         let loud = frame(1.5);
-        for _ in 0..4 {
+        for _ in 0..10 {
             assert_eq!(d.advance(1.0, &loud), None);
         }
-        // A drop at ~5 s is still inside the min dwell: hold, don't rotate.
+        // A drop at ~11 s is still inside the min dwell: hold, don't rotate.
+        assert_eq!(d.advance(1.0, &frame(0.1)), None);
+    }
+
+    #[test]
+    fn drop_between_min_dwell_and_gate_is_held() {
+        // The softened drop gate (ADR-0027): a drop that lands past the min dwell
+        // but before the gate (~37.5 s at the 20/90 default) must NOT rotate, so
+        // a drop shortly after a rotation can't rapid-fire another.
+        let mut d = director(true, 20, 90);
+        let loud = frame(1.5);
+        // Warm high and settle past the min dwell but short of the drop gate.
+        for _ in 0..25 {
+            assert_eq!(d.advance(1.0, &loud), None);
+        }
+        // A sharp drop at ~26 s (past min 20, before gate ~37.5) is held.
         assert_eq!(d.advance(1.0, &frame(0.1)), None);
     }
 
     #[test]
     fn manual_next_resets_the_dwell() {
-        let mut d = director(true, 8, 40);
+        let mut d = director(true, 20, 90);
         let steady = frame(1.5);
         // Approach the cap...
-        for _ in 0..39 {
+        for _ in 0..89 {
             assert_eq!(d.advance(1.0, &steady), None);
         }
         // ...then force a manual rotation, which resets the countdown.
@@ -293,9 +322,9 @@ mod tests {
 
     #[test]
     fn novelty_boundary_rotates_before_the_cap() {
-        let mut d = make(true, 8, 40, true);
+        let mut d = make(true, 20, 90, true);
         // Steady, no novelty, past the min dwell: still holds toward the cap.
-        for _ in 0..12 {
+        for _ in 0..25 {
             assert_eq!(d.advance(1.0, &frame_nov(1.0, 0.0)), None);
         }
         // A strong novelty boundary pulls the cap to the min dwell and rotates.
@@ -307,11 +336,11 @@ mod tests {
 
     #[test]
     fn novelty_before_min_dwell_holds() {
-        let mut d = make(true, 8, 40, true);
-        for _ in 0..3 {
+        let mut d = make(true, 20, 90, true);
+        for _ in 0..10 {
             assert_eq!(d.advance(1.0, &frame_nov(1.0, 0.0)), None);
         }
-        // A boundary at ~4 s is still inside the min dwell: novelty is never the
+        // A boundary at ~11 s is still inside the min dwell: novelty is never the
         // sole trigger, so it holds.
         assert_eq!(d.advance(1.0, &frame_nov(1.0, 1.0)), None);
     }
@@ -320,8 +349,8 @@ mod tests {
     fn steady_signal_never_rotates_on_novelty() {
         // Nudge enabled, but a steady low-novelty signal only rotates at the
         // hard max-dwell cap, never early.
-        let mut d = make(true, 8, 40, true);
-        for step in 1..40 {
+        let mut d = make(true, 20, 90, true);
+        for step in 1..90 {
             assert_eq!(
                 d.advance(1.0, &frame_nov(1.0, 0.0)),
                 None,
@@ -338,8 +367,8 @@ mod tests {
     fn disabled_track_change_ignores_novelty() {
         // With the nudge off, even a sustained boundary novelty can't rotate
         // before the cap.
-        let mut d = make(true, 8, 40, false);
-        for step in 1..40 {
+        let mut d = make(true, 20, 90, false);
+        for step in 1..90 {
             assert_eq!(
                 d.advance(1.0, &frame_nov(1.0, 1.0)),
                 None,

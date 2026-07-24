@@ -84,8 +84,8 @@ impl Default for Rotate {
     fn default() -> Self {
         Self {
             auto: false,
-            min_dwell_secs: 8,
-            max_dwell_secs: 40,
+            min_dwell_secs: 20,
+            max_dwell_secs: 90,
             track_change: true,
         }
     }
