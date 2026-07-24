@@ -1,6 +1,6 @@
 # 0026 — Calmer scene rotation: hold one scene by default, longer dwell, softened drop bias
 
-> **Status:** approved
+> **Status:** in-progress
 > **Created:** 2026-07-24
 > **Owner skill(s):** dev
 > **Related ADRs:** [0027-scene-rotation-constant-default-calmer-cadence](../adrs/0027-scene-rotation-constant-default-calmer-cadence.md); revises defaults from [Plan 0009](done/0009-live-performance-features.md)

@@ -263,6 +263,25 @@ mod tests {
     }
 
     #[test]
+    fn default_config_holds_one_scene_but_manual_overrides_work() {
+        // ADR-0027: a fresh install (default config) holds one scene — auto is
+        // off, so no automatic rotation ever fires, even through a long steady
+        // run and a sharp drop.
+        let mut d = Director::from_config(&config::Rotate::default());
+        assert!(!d.auto_enabled());
+        let loud = frame(1.5);
+        for _ in 0..200 {
+            assert_eq!(d.advance(1.0, &loud), None);
+        }
+        assert_eq!(d.advance(1.0, &frame(0.1)), None);
+        // But the manual next-scene hotkey still fires...
+        assert_eq!(d.force_next(), Rotation::Manual);
+        // ...and toggling auto on enables rotation live.
+        assert!(d.toggle_auto());
+        assert!(d.auto_enabled());
+    }
+
+    #[test]
     fn toggle_auto_flips_and_reports_state() {
         let mut d = director(true, 8, 40);
         assert!(d.auto_enabled());

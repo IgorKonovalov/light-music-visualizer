@@ -68,6 +68,8 @@ pub enum InputMode {
 #[serde(default)]
 pub struct Rotate {
     /// Auto-rotate on the dwell timer when true; manual-only (`Space`) when off.
+    /// Defaults to `false` (ADR-0027): a fresh install holds one scene until the
+    /// operator opts into rotation via the `toggle_auto` hotkey or `auto = true`.
     pub auto: bool,
     /// Never rotate sooner than this many seconds after the last change.
     pub min_dwell_secs: u32,
@@ -81,7 +83,7 @@ pub struct Rotate {
 impl Default for Rotate {
     fn default() -> Self {
         Self {
-            auto: true,
+            auto: false,
             min_dwell_secs: 8,
             max_dwell_secs: 40,
             track_change: true,
