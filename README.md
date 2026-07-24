@@ -81,10 +81,14 @@ already playing** (system audio, via WASAPI loopback) — start some music, and 
 
 ### Controls
 
+By default the app **holds one scene** — pick a look and it stays. Press `A` to
+opt into auto-rotate (or set `auto = true` under `[rotate]` in `config.toml`);
+when it's on, a scene holds ~20–90 s and an energy drop can nudge a change early.
+
 | Key       | Action                                                      |
 |-----------|-------------------------------------------------------------|
 | `Space`   | Next preset (and restart the auto-rotate timer)             |
-| `A`       | Toggle auto-rotate on/off                                   |
+| `A`       | Toggle auto-rotate on/off (off by default)                  |
 | `Tab`     | Open/close the preset browser (`↑`/`↓` navigate, `Enter` select, `Esc` close) |
 | `F`       | Toggle fullscreen                                           |
 | `D`       | Cycle to the next display/monitor                           |

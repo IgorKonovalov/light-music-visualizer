@@ -61,9 +61,25 @@ pub enum InputMode {
     LineIn,
 }
 
-/// `[rotate]` — the scene director's auto-rotate policy (Plan 0009 Phase 3).
+/// `[rotate]` — the scene director's auto-rotate policy (Plan 0009 Phase 3;
+/// defaults revised by ADR-0027 / Plan 0026).
+///
+/// **Hold one scene by default.** Out of the box (no `config.toml`) `auto` is
+/// `false`, so the app stays on a single scene until the operator opts in — the
+/// `A` hotkey (`toggle_auto`) live, or `auto = true` in the config. Manual
+/// `Space` next-scene works either way.
+///
+/// **Calm cadence when auto is on.** The defaults favour a mostly-predictable,
+/// timer-led rotation rather than a frantic one: a steady passage holds to the
+/// `max_dwell_secs` cap (90 s), never rotating before `min_dwell_secs` (20 s).
+/// An energy *drop* can still land a change early, but only well past the min
+/// dwell (a softened gate, ~37.5 s at the default), so it can't flip scenes every
+/// few seconds; a track-change boundary can nudge rotation in on the same dwell.
+///
 /// Dwell bounds are whole seconds (integers in the config, per the data shape),
-/// converted to the director's internal float clock at construction.
+/// converted to the director's internal float clock at construction. Every field
+/// is `#[serde(default)]`, so an existing `config.toml` that pins these values
+/// keeps its behaviour — the revised defaults reach only a fresh install.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Rotate {
@@ -72,8 +88,10 @@ pub struct Rotate {
     /// operator opts into rotation via the `toggle_auto` hotkey or `auto = true`.
     pub auto: bool,
     /// Never rotate sooner than this many seconds after the last change.
+    /// Defaults to 20 s (was 8; ADR-0027).
     pub min_dwell_secs: u32,
     /// Always rotate by this many seconds even through a steady passage.
+    /// Defaults to 90 s (was 40; ADR-0027).
     pub max_dwell_secs: u32,
     /// Let the experimental track-change novelty signal nudge rotation (wired in
     /// Phase 4). On by default but clearly experimental.
