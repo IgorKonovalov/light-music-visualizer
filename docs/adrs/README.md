@@ -7,7 +7,7 @@ ADR that supersedes the old one and update the status here.
 Rule of thumb: if you can't name an option you're *not* taking, you don't need an ADR —
 you need a code comment.
 
-**Next free number: 0026**
+**Next free number: 0028**
 
 | ADR  | Title                                                      | Status   |
 |------|------------------------------------------------------------|----------|
@@ -36,3 +36,5 @@ you need a code comment.
 | [0023](0023-golden-drift-guard-uses-frozen-fixtures.md) | Golden drift guard renders frozen per-system test fixtures (exhaustive `match SystemKind`), not shipped presets; shipped presets keep only behavioral floors | accepted |
 | [0024](0024-cross-preset-transitions.md) | Cross-preset transitions: two-input blend stage over the engine composite, adaptive dual-live/freeze, engine-default policy (builds on 0018) | proposed |
 | [0025](0025-foobar-component-version-single-sourced.md) | Single-source the foobar component version from the workspace version via a build-time generated header (revises Plan 0006's independent-plugin-version note); C ABI axis untouched | accepted |
+| [0026](0026-full-composite-coverage-fullscreen-scenes.md) | Full composite coverage: background + view transform reach reaction-diffusion and attractor via alpha-present-over-backdrop and named-param zoom/pan (extends 0018); mirror stays line-only | proposed |
+| [0027](0027-scene-rotation-constant-default-calmer-cadence.md) | Scene rotation: hold one scene by default (auto off), 20/90 dwell, softened-not-removed drop bias (revises Plan 0009 defaults); standalone-only | proposed |
