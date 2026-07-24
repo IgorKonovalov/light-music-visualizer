@@ -14,7 +14,6 @@ re-deriving state from `git log`. Completed plans move to `done/`.
 | [0020](0020-shared-palette-system.md) | Shared palette system: gradient LUT, named + custom palettes, bindable color (all four scenes) | approved | Give presets real color control. **All four** shader-colored scenes (fragment, swarm, reaction-diffusion, attractor) hardcode the **same** iq cosine palette, so a preset's only color lever is a scalar `hue` offset — fragment fields can't hold a cohesive mood, swarm/attractor color is unreachable (per-particle hue random/`0.15`-jittered, making `hue` a visual no-op), and RD is locked to a rainbow (the coral trio, commit 5b64ad2, could only rotate the fixed `v*0.85` sweep). Add one shared `core/src/render/palette.rs` that bakes a gradient (built-in **named** palette or **custom stops**) into a 256-entry LUT every scene colors through — delivered to the fragment/RD/attractor scenes as a 256x1 1D texture, sampled on CPU by the swarm — plus **fully bindable** color via layer-2 named params (`saturation`, `hue`, fragment/RD `color_span`/`color_center`, swarm/attractor `hue_spread`/`hue_center`) and an A/B `palette_mix` crossfade for bindable palette *selection*. Default `spectrum` palette = the exact current cosine, so the shipped presets are **visually unchanged** until re-authored. Adds one thin off-hot-path `Scene::set_palette` hook (second widening after ADR-0007's `configure`). **Scope expanded 2026-07-23** to fold RD + attractor into a new **Phase 5** (was a followup) at user direction, on `preset-author` coral-trio evidence; docs sweep now Phase 6. Core-only, **C ABI frozen**, no new dependency; from `preset-author`-lane color feedback (commits 76a2fb4, 5b64ad2). [ADR-0021](../adrs/0021-shared-palette-system.md), supplements [ADR-0002](../adrs/0002-layered-preset-architecture.md); rejected in-shader stop-array, cosine-coefficient params, minimal per-scene fix, bindable integer palette index, OKLab color management. **Independent of the `dt` coupling** (touches preset schema + scene shaders, not the render clock) — can land anytime. |
 | [0023](0023-cross-preset-transitions.md) | Cross-preset visual transitions: MilkDrop-style dissolves between presets | approved | Replace the instant preset **cut** with a MilkDrop-style **dissolve**. An engine `Transition` controller, driven by injected `dt`, blends the outgoing and incoming presets over ~1 s using a **small library** of blend kinds (crossfade, additive/burn, luma-dissolve, wipe/slide). The outgoing side is **snapshotted at transition start** (freeze path + safety net); the incoming renders live; **adaptive** logic re-renders the outgoing scene live too, but only when it is a *different* scene object and the frame budget is healthy, else it falls back to the snapshot (protects the 60 fps iGPU floor, NFR §1, and handles the same-slot case for free). Blends **fully-composited per-preset frames** via a two-input blend stage appended to Plan 0018's composite. Policy (kind/duration) is **engine-configured in code**; preset-declared `[transition]`, beat-quantized dissolves, and operator UI are explicit follow-ups. **Core-only, C ABI untouched, no new dependency.** **Sequenced after Plan 0018** (reuses its offscreen target + present + `Clear`->`Load` scenes; transitively after Plan 0014's `PingPongField` + injected `dt`). Realizes the cross-preset blending deferred by Plan 0003. [ADR-0024](../adrs/0024-cross-preset-transitions.md); rejected single-target alpha, always-dual-live, always-freeze, a `TransitionScene` wrapper, and preset-declared-now. |
 | [0025](0025-full-composite-coverage.md) | Full composite coverage: background + view transform for reaction-diffusion and attractor | approved | Close the ADR-0018 coverage gap surfaced by the `preset-author` lane (design-backlog 0001): the **background** (`bg_*`) and **view transform** (`zoom`/`pan_*`) levers silently do nothing on the two fullscreen/accumulating scenes because both present **opaque** (overwriting the backdrop) and neither wired the view params. Switch both scenes' **final present** to an **alpha-blend over the backdrop** (scene structure/luminance drives alpha, so coral voids / attractor negative space reveal the `bg_*` gradient), and have both accept `zoom`/`pan_*` via `set_param` applied in their own space — exactly as `fragment_field` does. Full-audit scope (both scenes); default backdrop is dark so shipped presets stay ~unchanged (goldens deliberately re-blessed). **No `Scene`-trait change, C ABI untouched**; `mirror_*` stays line-only by design. Touches the same RD/attractor present shaders as Plan 0020 — coordinate order. [ADR-0026](../adrs/0026-full-composite-coverage-fullscreen-scenes.md), extends [ADR-0018](../adrs/0018-engine-wide-scene-compositing.md); rejected self-contained per-scene backdrop, leave-opaque-and-document, a `Scene::set_view` hook. |
-| [0026](0026-calmer-scene-rotation.md) | Calmer scene rotation: hold one scene by default, longer dwell, softened drop bias | approved | The standalone auto-rotate **Director** (Plan 0009) ships `auto = true` with an 8 s min / 40 s max dwell and an energy-drop bias that fires at the *min* dwell — so in dynamic music scenes change roughly every 8 s. User wants the reverse default: **hold one scene** out of the box, and a **calm, mostly-predictable** cadence when rotation is opted in. Flip `auto` to `false`, lengthen the default dwell to **20 s / 90 s**, and **soften (not remove) the drop bias** so a drop only rotates early well past the longer min dwell (novelty nudge stays). Every `Rotate` field is `#[serde(default)]`, so a pinned `config.toml` keeps its behavior; only fresh installs get the new defaults. **Standalone only** (`director.rs` + `config.rs`); core, DSP, and C ABI untouched. [ADR-0027](../adrs/0027-scene-rotation-constant-default-calmer-cadence.md), revises [Plan 0009](done/0009-live-performance-features.md) defaults; rejected keep-auto-on-just-slower, timer-only (drop bias dropped), remove-auto-rotate-entirely. |
 
 ## Recommended execution sequence
 
@@ -70,11 +69,6 @@ the RD/attractor present shaders with [0020]**, so those two should be sequenced
 rebases onto 0020. No hard `dt` dependency (builds on the already-landed Plan 0018 composite). Core-only,
 C ABI untouched. **Approved** — ready for `dev` (sequence deliberately with 0020). [ADR-0026](../adrs/0026-full-composite-coverage-fullscreen-scenes.md).
 
-**[0026] Calmer scene rotation** is small, **standalone-only** (`director.rs` + `config.rs`), and fully
-independent of every core/`dt` plan above — it can land anytime. Flips the out-of-box default to
-hold-one-scene, lengthens the dwell, and softens the drop bias. **Approved** — ready for `dev`.
-[ADR-0027](../adrs/0027-scene-rotation-constant-default-calmer-cadence.md).
-
 ## Standing (not a plan)
 
 - **[On-device validation — low-end Windows iGPU smoke](../on-device-validation.md)** — a
@@ -85,6 +79,39 @@ hold-one-scene, lengthens the dwell, and softens the drop bias. **Approved** —
   iGPU-fps carry-forward).
 
 ## Recently closed
+
+- [0026 — Calmer scene rotation: hold one scene by default, longer dwell, softened drop bias](done/0026-calmer-scene-rotation.md) —
+  **done 2026-07-24**, passed Mode 4 review (no blockers, no majors; one minor, one nit). Three `dev`
+  phase commits (`f3dab1c` hold-one-scene default, `49600a2` longer dwell + softened drop gate,
+  `f4fd2c7` operator docs). Reverses Plan 0009's "lively unattended show" default (ADR-0027, now
+  **accepted**): `Rotate::default().auto` flips **`true` -> `false`** so a fresh install (no
+  `config.toml`) holds one scene until the operator opts in via the `A` hotkey (`toggle_auto`) or
+  `auto = true`; manual `Space` next-scene works either way. When auto **is** on the cadence is calm:
+  default dwell **8/40 -> 20/90 s**, and the energy-drop bias is **softened, not removed** — gated
+  behind `DROP_GATE_FRACTION` (0.25) of the min->max span past the min dwell (`min + 0.25*(max-min)`
+  ~37.5 s at the default), so a drop just after a rotation can't rapid-fire another; the max-dwell
+  timer and the novelty nudge are unchanged. The gate is **proportional to the span** (the
+  fraction-of-span option the plan's Phase 2 explicitly sanctions over a fixed `DROP_GATE_SECS`), so
+  it scales sensibly for custom dwell configs. Every `Rotate` field is `#[serde(default)]`, so a
+  pinned `config.toml` keeps its behaviour — only fresh installs get the revised defaults. Docs
+  (config.rs module doc + README Controls) state hold-by-default, the opt-in path, and the new
+  cadence. Verified: **13/13 `director` tests green** — incl. `default_config_holds_one_scene_but_
+  manual_overrides_work` (default config never auto-rotates over 200 s + a drop, yet `force_next`
+  returns `Manual` and `toggle_auto` enables it), `steady_passage_rotates_at_max_dwell` (holds to the
+  90 s cap), `energy_drop_rotates_earlier_than_the_cap` (a drop past the ~37.5 s gate fires
+  `AutoDrop`), and the new `drop_between_min_dwell_and_gate_is_held` (a drop past min 20 but before the
+  gate is **held**, asserting the softened gate prevents rapid re-fire). **Standalone-only**
+  (`director.rs` + `config.rs` + `README.md`); **core, DSP, and C ABI untouched**; determinism
+  preserved (injected-`dt` EMA, no wall clock, no unseeded randomness). **Minor:** the novelty nudge
+  (`AutoBoundary`) is still bounded only by the min dwell (can rotate at ~20 s on a strong boundary),
+  not by the ~37.5 s drop gate — intended per the plan ("novelty rides the same dwell"), but worth an
+  on-device look since a lively `novelty` could feel quicker than the calmed drop path; `track_change`
+  is on-by-default and experimental. **Nit:** two pre-existing tests (`auto_off_never_auto_rotates_
+  but_manual_still_works`, `toggle_auto_flips_and_reports_state`) still construct explicit `8, 40`
+  configs — correct (they exercise behaviour, not defaults), just no longer echoing the shipped
+  numbers. **On-device followup (non-blocking):** tune the 20/90 dwell + drop gate during the next
+  live soak; optional scene-lock/on-screen rotation-state indicator. Version **minor 0.8.0 -> 0.9.0**
+  at close.
 
 - [0018 — Engine-wide visual enrichment: zoom, atmosphere, easing, mirrors](done/0018-engine-wide-visual-enrichment.md) —
   **done 2026-07-23**, passed Mode 4 review (no blockers, no majors; three minor, two nits). Eight

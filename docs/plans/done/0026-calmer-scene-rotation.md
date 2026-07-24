@@ -1,7 +1,15 @@
 # 0026 — Calmer scene rotation: hold one scene by default, longer dwell, softened drop bias
 
-> **Status:** in-progress
+> **Status:** done
 > **Created:** 2026-07-24
+> **Closed:** 2026-07-24 — passed Mode 4 review (no blockers, no majors; one minor, one nit). Three
+> `dev` phase commits (`f3dab1c` hold-one-scene default, `49600a2` longer dwell + softened drop gate,
+> `f4fd2c7` operator docs). Verified: 13/13 `director` tests green; standalone-only (`config.rs` +
+> `director.rs` + `README.md`); core, DSP, and C ABI untouched; determinism preserved (injected-`dt`
+> EMA, no wall clock, no randomness). The softened drop gate is a proportional
+> `min + 0.25*(max-min)` (~37.5 s at the 20/90 default) — the fraction-of-span option the plan's
+> Phase 2 explicitly sanctions, chosen over a fixed `DROP_GATE_SECS` so it scales for custom dwell
+> configs. Version minor **0.8.0 -> 0.9.0** at close.
 > **Owner skill(s):** dev
 > **Related ADRs:** [0027-scene-rotation-constant-default-calmer-cadence](../adrs/0027-scene-rotation-constant-default-calmer-cadence.md); revises defaults from [Plan 0009](done/0009-live-performance-features.md)
 

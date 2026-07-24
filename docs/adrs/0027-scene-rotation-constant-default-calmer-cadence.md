@@ -1,6 +1,6 @@
 # ADR-0027 — Scene rotation: hold one scene by default, calmer cadence, softened drop bias
 
-> **Status:** proposed
+> **Status:** accepted
 > **Date:** 2026-07-24
 > **Related plan(s):** [0026-calmer-scene-rotation](../plans/0026-calmer-scene-rotation.md); revises the defaults set by [Plan 0009](../plans/done/0009-live-performance-features.md) (`standalone/src/director.rs`, `config.rs`)
 
