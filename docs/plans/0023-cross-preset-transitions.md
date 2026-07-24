@@ -1,6 +1,6 @@
 # 0023 — Cross-preset visual transitions: MilkDrop-style dissolves between presets
 
-> **Status:** draft
+> **Status:** approved
 > **Created:** 2026-07-23
 > **Owner skill(s):** dev
 > **Related ADRs:** [0024-cross-preset-transitions](../adrs/0024-cross-preset-transitions.md); builds on [ADR-0018](../adrs/0018-engine-wide-scene-compositing.md) (engine composite: offscreen target + present pass, scenes stop clearing) and Plan 0014 ([ADR-0012](../adrs/0012-stateful-feedback-render-system.md) `PingPongField` + [ADR-0013](../adrs/0013-c-abi-v4-render-dt.md) injected `dt`); realizes the "cross-preset blending" follow-up deferred by [Plan 0003](done/0003-generative-scenes-and-presets.md)
